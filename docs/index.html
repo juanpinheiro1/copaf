@@ -43,6 +43,9 @@
   .kpi.big { background:var(--pri); color:#fff; } .kpi.big small { color:#cfe5d8; }
   .tag { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px; background:#fdecdc; color:var(--warn); }
   .tag.ok { background:var(--pri2); color:var(--pri); }
+  .tag.az { background:#e3eefc; color:#1c4f9c; }
+  .checks { display:flex; gap:14px; flex-wrap:wrap; align-items:center; font-size:13px; }
+  .checks label { flex-direction:row; align-items:center; gap:5px; font-size:13px; color:var(--ink); }
   .aviso { background:#fff6e9; border-color:#f0c48a; color:#7a3d0c; }
   .msg { color:var(--err); margin:8px 0 0; min-height:1em; }
   .mut { color:var(--mut); }
@@ -56,6 +59,7 @@
     #rel td, #rel th { border-bottom:1px solid #bbb; padding:4px 6px; }
     #rel .tot td { font-weight:700; border-top:2px solid #000; }
     #rel .relaviso { border:2px solid #000; padding:8px 10px; margin:14px 0 0; }
+    #rel .previa { border:2px dashed #000; padding:4px 10px; font-weight:700; display:inline-block; }
   }
 </style>
 </head>
@@ -137,14 +141,56 @@ function ler(form, fields) {
 
 // ───────── referências ─────────
 async function carregarRef() {
-  const [co, mo, ve, fu, ta] = await Promise.all([
+  const [co, mo, ve, fu, ta, pr, re] = await Promise.all([
     q(sb.from('cooperados').select('*').order('nome')), q(sb.from('motoristas').select('*').order('nome')),
     q(sb.from('veiculos').select('*').order('placa')), q(sb.from('funcionarios').select('*').order('nome')),
-    q(sb.from('tipos_ave').select('*').order('codigo'))]);
-  st.ref = { cooperados:co, motoristas:mo, veiculos:ve, funcionarios:fu, tipos_ave:ta };
+    q(sb.from('tipos_ave').select('*').order('codigo')),
+    q(sb.from('produtos').select('*').order('ordem')), q(sb.from('rendimentos').select('*'))]);
+  st.ref = { cooperados:co, motoristas:mo, veiculos:ve, funcionarios:fu, tipos_ave:ta, produtos:pr, rendimentos:re };
 }
 const nomeDe = (lista, id, campo = 'nome') => (st.ref[lista].find(x => x.id === id) || {})[campo] || '—';
 const ativos = l => st.ref[l].filter(x => x.ativo !== false);
+
+// ───────── PLANO DE CORTES ─────────
+const STATUS = { aberto:'Aberto', em_producao:'Em produção', finalizado:'Finalizado' };
+const STATUS_TAG = { aberto:'', em_producao:'az', finalizado:'ok' };
+const MIUDOS = [['figado', 'Fígado'], ['moela', 'Moela'], ['coracao', 'Coração'], ['pescoco', 'Pescoço'], ['pe', 'Pé']];
+const OPC = {
+  peito: { com_osso:'Peito com osso', file:'Filé de peito + sassami' },
+  perna: { junta:'Coxa e sobrecoxa (juntas)', separada:'Coxa e sobrecoxa separadas' },
+  asa:   { completa:'Asa completa (com ponta)', sem_ponta:'Asa (sem ponta)', tulipa_meio:'Coxinha da asa (tulipa) + meio da asa' } };
+function produtosDoPlano(p) {
+  if (p.destino === 'inteiro') return ['inteiro_miudos'];
+  const r = [];
+  if (p.peito === 'com_osso') r.push('peito_osso'); if (p.peito === 'file') r.push('file_peito', 'sassami');
+  if (p.perna === 'junta') r.push('coxa_sobrecoxa'); if (p.perna === 'separada') r.push('coxa', 'sobrecoxa');
+  if (p.asa === 'completa') r.push('asa_completa'); if (p.asa === 'sem_ponta') r.push('asa'); if (p.asa === 'tulipa_meio') r.push('coxinha_asa', 'meio_asa');
+  if (p.dorso) r.push('dorso');
+  return r.concat(p.miudos || []);
+}
+const nomeProduto = c => (st.ref.produtos.find(p => p.codigo === c) || {}).nome || c;
+const pctDe = (tipo, prod) => Number((st.ref.rendimentos.find(r => r.tipo_ave === tipo && r.produto === prod) || {}).pct || 0);
+const pesoMedio = l => l.peso_liquido_kg && l.aves_recebidas ? l.peso_liquido_kg / l.aves_recebidas : null;
+function descPlano(p, tipoAve) {
+  if (p.destino === 'inteiro') return tipoAve === 'GL' ? 'Galeto inteiro com miúdos' : 'Frango inteiro com miúdos';
+  return produtosDoPlano(p).map(nomeProduto).join(', ') || 'nenhum corte escolhido';
+}
+// kg previstos por produto: aves do plano × peso médio vivo × rendimento do tipo de ave
+function previsao(l, planos) {
+  const pm = pesoMedio(l); if (pm == null) return null;
+  const tot = {};
+  for (const p of planos) for (const c of produtosDoPlano(p)) tot[c] = (tot[c] || 0) + p.aves * pm * pctDe(l.tipo_ave, c) / 100;
+  return st.ref.produtos.filter(p => tot[p.codigo] != null).map(p => ({ codigo:p.codigo, nome:p.nome, pct:pctDe(l.tipo_ave, p.codigo), kg:tot[p.codigo] }));
+}
+function tabelaPrevisao(l, planos) {
+  const pv = previsao(l, planos);
+  if (!planos.length) return '';
+  if (!pv) return '<p class="mut">Lote sem pesagem: não há peso médio para prever os kg por produto.</p>';
+  const total = pv.reduce((a, x) => a + x.kg, 0);
+  return `<table><tr><th>Produto</th><th class="n">Rendimento (% do peso vivo)</th><th class="n">Previsão (kg)</th></tr>
+    ${pv.map(x => `<tr><td>${esc(x.nome)}</td><td class="n">${num(x.pct, 2)}%</td><td class="n">${num(x.kg, 1)}</td></tr>`).join('')}
+    <tr class="tot"><td><b>Total previsto</b></td><td></td><td class="n"><b>${num(total, 1)}</b></td></tr></table>`;
+}
 
 // ───────── DIA DE PRODUÇÃO ─────────
 const F_DIA = [
@@ -154,6 +200,7 @@ const F_DIA = [
   { k:'tarifa_agua', label:'Tarifa água (R$/m³)', type:'number' }, { k:'observacao', label:'Observação' }];
 const F_LOTE = [
   { k:'ordem', label:'Ordem no dia', type:'number', step:1, req:true },
+  { k:'status', label:'Status', type:'select', req:true, def:'aberto', options:() => Object.entries(STATUS) },
   { k:'cooperado_id', label:'Cooperado', type:'select', int:true, req:true, options:() => ativos('cooperados').map(c => [c.id, c.nome]) },
   { k:'tipo_ave', label:'Tipo de ave', type:'select', req:true, options:() => st.ref.tipos_ave.map(t => [t.codigo, `${t.codigo} · ${t.nome}`]) },
   { k:'motorista_id', label:'Motorista', type:'select', int:true, options:() => ativos('motoristas').map(c => [c.id, c.nome]) },
@@ -169,13 +216,17 @@ const F_LOTE = [
 
 async function telaDia() {
   const d = st.data;
-  const [dia, diaristas, custos, lotes, cd, cl] = await Promise.all([
+  let [dia, diaristas, custos, lotes, cd, cl] = await Promise.all([
     q(sb.from('dias_producao').select('*').eq('data', d).maybeSingle()),
     q(sb.from('dia_diaristas').select('*').eq('data', d).order('id')),
     q(sb.from('dia_custos').select('*').eq('data', d).order('id')),
     q(sb.from('lotes').select('*').eq('data', d).order('ordem')),
     q(sb.from('v_custo_dia').select('*').eq('data', d).maybeSingle()),
     q(sb.from('v_custo_lote').select('*').eq('data', d))]);
+  const planos = lotes.length ? await q(sb.from('lote_planos').select('*').in('lote_id', lotes.map(l => l.id)).order('id')) : [];
+  // dia fechado: vale o custo gravado no fechamento, não o recalculado
+  if (dia && dia.fechado && dia.f_total != null) cd = { ...cd, custo_diaristas:dia.f_diaristas, custo_energia:dia.f_energia, custo_agua:dia.f_agua,
+    custo_limpeza:dia.f_limpeza, custo_outros:dia.f_outros, parcela_custos_mensais:dia.f_mensal, custo_total:dia.f_total, cabecas_dia:dia.f_cabecas };
   const topo = `<div class="card row"><label>Data <input type="date" id="dData" value="${d}"></label>
     ${dia ? `<span class="tag ${dia.fechado ? 'ok' : ''}">${dia.fechado ? 'Dia fechado' : 'Dia em aberto'}</span>
       <button class="b ${dia.fechado ? 'warn' : ''}" id="bFechar">${dia.fechado ? 'Reabrir dia' : 'Fechar dia'}</button>` : ''}</div>`;
@@ -188,7 +239,11 @@ async function telaDia() {
   const diaristasCad = ativos('funcionarios').filter(f => f.vinculo === 'diarista');
   const acharDiarista = nome => diaristasCad.find(f => f.nome.trim().toLowerCase() === nome.trim().toLowerCase());
   const fx = dia.fechado, porCab = cd.cabecas_dia ? cd.custo_total / cd.cabecas_dia : null, semMensal = !Number(cd.parcela_custos_mensais);
-  const custoLote = id => (cl.find(x => x.lote_id === id) || {}).custo_lote;
+  const custoLote = id => { const l = lotes.find(x => x.id === id); return l && l.custo_fechado != null ? l.custo_fechado : (cl.find(x => x.lote_id === id) || {}).custo_lote; };
+  const planosDe = id => planos.filter(p => p.lote_id === id);
+  const noPlano = id => planosDe(id).reduce((a, p) => a + p.aves, 0);
+  const tagPlano = l => { const n = noPlano(l.id), t = l.cabecas_pagantes; return !n ? '<span class="tag">sem plano</span>' : n === t ? '<span class="tag ok">plano fechado</span>' : n < t ? `<span class="tag">faltam ${num(t - n)} aves</span>` : `<span class="tag">excede em ${num(n - t)}</span>`; };
+  const lp = lotes.find(l => l.id === st.planoLote);
   main.innerHTML = topo + `
   ${semMensal ? `<div class="card aviso">Os custos fixos mensais de ${d.slice(5, 7)}/${d.slice(0, 4)} ainda não foram informados. O custo abaixo traz <b>somente os custos do dia</b> (diaristas, energia, água, limpeza e outros). <button class="lnk" id="bIrMes">Informar custos fixos do mês</button></div>` : ''}
   <div class="card"><h2>Custo do dia</h2><div class="kpis">
@@ -230,15 +285,46 @@ async function telaDia() {
       <label>Valor (R$) <input name="valor" type="number" step="0.01" required ${fx ? 'disabled' : ''}></label>
       <button class="b sec" ${fx ? 'disabled' : ''}>Adicionar</button></form></div>
 
-  <div class="card"><h2>Lotes do dia</h2><div class="scroll"><table>
-    <tr><th>Lote</th><th>Cooperado</th><th>Ave</th><th class="n">Peso líq. (kg)</th><th class="n">Aves</th><th class="n">Média (kg)</th><th class="n">Mortos</th><th class="n">Cond.</th><th class="n">Cabeças pagantes</th><th class="n">Custo do lote</th><th></th></tr>
-    ${lotes.map(l => `<tr><td>${esc(l.codigo)}</td><td>${esc(nomeDe('cooperados', l.cooperado_id))}</td><td>${esc(l.tipo_ave)}</td>
+  <div class="card"><h2>Lotes do dia</h2>
+    <p class="mut">O custo de cada lote é ${fx ? 'definitivo: o dia está fechado.' : 'uma prévia até o dia ser fechado. Para fechar o dia: leituras inicial e final dos medidores, diaristas lançados e todos os lotes finalizados.'}</p>
+    <div class="scroll"><table>
+    <tr><th>Lote</th><th>Status</th><th>Cooperado</th><th>Ave</th><th class="n">Peso líq. (kg)</th><th class="n">Aves</th><th class="n">Média (kg)</th><th class="n">Mortos</th><th class="n">Cond.</th><th class="n">Cabeças pagantes</th><th>Plano de cortes</th><th class="n">Custo do lote</th><th></th></tr>
+    ${lotes.map(l => `<tr><td>${esc(l.codigo)}</td><td><span class="tag ${STATUS_TAG[l.status]}">${STATUS[l.status]}</span></td><td>${esc(nomeDe('cooperados', l.cooperado_id))}</td><td>${esc(l.tipo_ave)}</td>
       <td class="n">${l.peso_liquido_kg == null ? '<span class="tag">sem pesagem</span>' : num(l.peso_liquido_kg, 0)}</td>
-      <td class="n">${num(l.aves_recebidas)}</td><td class="n">${l.peso_liquido_kg && l.aves_recebidas ? num(l.peso_liquido_kg / l.aves_recebidas, 2) : '—'}</td>
+      <td class="n">${num(l.aves_recebidas)}</td><td class="n">${pesoMedio(l) ? num(pesoMedio(l), 2) : '—'}</td>
       <td class="n">${num(l.mortos_chegada)}</td><td class="n">${num(l.condenadas)}</td><td class="n">${num(l.cabecas_pagantes)}</td>
+      <td>${tagPlano(l)} <button class="lnk" data-plano="${l.id}">${fx ? 'ver' : 'montar'}</button></td>
       <td class="n"><b>${brl(custoLote(l.id))}</b></td>
-      <td><button class="lnk" data-rel="${l.id}">relatório</button>${fx ? '' : `<button class="lnk" data-edit="${l.id}">editar</button><button class="lnk" data-del="lotes:${l.id}">excluir</button>`}</td></tr>`).join('') || '<tr><td colspan="11" class="mut">Nenhum lote lançado.</td></tr>'}
+      <td>${fx ? '' : (l.status === 'aberto' ? `<button class="lnk" data-st="${l.id}:em_producao">iniciar produção</button>` : l.status === 'em_producao' ? `<button class="lnk" data-st="${l.id}:finalizado">finalizar</button>` : `<button class="lnk" data-st="${l.id}:em_producao">reabrir lote</button>`)}
+        <button class="lnk" data-rel="${l.id}">relatório</button>${fx ? '' : `<button class="lnk" data-edit="${l.id}">editar</button><button class="lnk" data-del="lotes:${l.id}">excluir</button>`}</td></tr>`).join('') || '<tr><td colspan="13" class="mut">Nenhum lote lançado.</td></tr>'}
     </table></div></div>
+
+  ${!lp ? '' : `<div class="card" id="cPlano"><h2>Plano de cortes · lote ${esc(lp.codigo)} · ${esc(nomeDe('cooperados', lp.cooperado_id))}</h2>
+    <div class="kpis" style="margin-bottom:12px">
+      <div class="kpi"><small>Aves do lote (cabeças pagantes)</small><b>${num(lp.cabecas_pagantes)}</b></div>
+      <div class="kpi"><small>Aves já no plano</small><b>${num(noPlano(lp.id))}</b></div>
+      <div class="kpi ${noPlano(lp.id) === lp.cabecas_pagantes ? 'big' : ''}"><small>Situação</small><b>${noPlano(lp.id) === lp.cabecas_pagantes ? 'Plano fechado' : noPlano(lp.id) < lp.cabecas_pagantes ? 'Faltam ' + num(lp.cabecas_pagantes - noPlano(lp.id)) : 'Excede em ' + num(noPlano(lp.id) - lp.cabecas_pagantes)}</b></div>
+      <div class="kpi"><small>Peso médio vivo</small><b>${pesoMedio(lp) ? num(pesoMedio(lp), 2) + ' kg' : 'sem pesagem'}</b></div></div>
+    <div class="scroll"><table><tr><th class="n">Aves</th><th>Entrega</th><th>Conservação</th><th>Observação</th><th></th></tr>
+    ${planosDe(lp.id).map(p => `<tr><td class="n">${num(p.aves)}</td><td style="white-space:normal">${esc(descPlano(p, lp.tipo_ave))}</td><td>${p.conservacao === 'congelado' ? 'Congelado' : 'Resfriado'}</td><td>${esc(p.observacao)}</td>
+      <td>${fx ? '' : `<button class="lnk" data-del="lote_planos:${p.id}">remover</button>`}</td></tr>`).join('') || '<tr><td colspan="5" class="mut">Nenhuma linha no plano. Inclua abaixo quantas aves vão para cada tipo de entrega, até fechar o total do lote.</td></tr>'}
+    </table></div>
+    ${fx ? '' : `<h2 style="margin-top:16px">Incluir no plano de cortes</h2>
+    <form id="fPlano">
+      <div class="row">
+        <label>Quantidade de aves <input name="aves" type="number" step="1" min="1" required value="${Math.max(lp.cabecas_pagantes - noPlano(lp.id), 0) || ''}"></label>
+        <label>Entrega <select name="destino"><option value="cortes">Em cortes</option><option value="inteiro">${lp.tipo_ave === 'GL' ? 'Galeto inteiro com miúdos' : 'Frango inteiro com miúdos'}</option></select></label>
+        <label>Conservação <select name="conservacao"><option value="resfriado">Resfriado</option><option value="congelado">Congelado</option></select></label>
+        <label>Observação <input name="observacao"></label></div>
+      <div id="pCortes" style="margin-top:10px">
+        <div class="row">
+          ${Object.entries(OPC).map(([k, o]) => `<label>${{ peito:'Peito', perna:'Perna', asa:'Asa' }[k]} <select name="${k}"><option value="">não entregar</option>${Object.entries(o).map(([v, n], i) => `<option value="${v}" ${i === 0 ? 'selected' : ''}>${n}</option>`).join('')}</select></label>`).join('')}</div>
+        <div class="checks" style="margin-top:10px"><span class="mut">Também entregar:</span>
+          <label><input type="checkbox" name="dorso" checked> Canja (dorso)</label>
+          ${MIUDOS.map(([v, n]) => `<label><input type="checkbox" name="miudo_${v}" checked> ${n}</label>`).join('')}</div></div>
+      <p><button class="b">Adicionar ao plano</button> <button type="button" class="b sec" id="bFecharPlano">Fechar painel</button></p></form>`}
+    <h2 style="margin-top:16px">Produção prevista</h2>${tabelaPrevisao(lp, planosDe(lp.id)) || '<p class="mut">A previsão aparece conforme o plano é montado.</p>'}
+    <p class="mut" style="margin-top:8px">Rendimentos de referência por tipo de ave, editáveis em Cadastros → Rendimentos. Peso seco, antes do chiller.</p></div>`}
 
   <div class="card" id="cLote"><h2 id="tLote">Novo lote</h2>
     <form id="fLote"><div class="grid">${campos(F_LOTE, { ordem: (lotes.at(-1)?.ordem || 0) + 1 }, fx)}</div>
@@ -246,8 +332,8 @@ async function telaDia() {
 
   $('#dData').onchange = e => { st.data = e.target.value; render(); };
   $('#bFechar').onclick = async () => {
-    if (!fx && !confirm(`Fechar o dia ${dataBR(d)}? Os lançamentos ficam bloqueados para edição.`)) return;
-    try { await q(sb.from('dias_producao').update({ fechado:!fx, fechado_em: fx ? null : new Date().toISOString() }).eq('data', d)); render(); } catch (e) { falha(e); }
+    if (!confirm(fx ? `Reabrir o dia ${dataBR(d)}? O custo gravado no fechamento será descartado e recalculado.` : `Fechar o dia ${dataBR(d)}? O custo de cada lote fica definitivo e os lançamentos são bloqueados.`)) return;
+    try { await q(sb.rpc(fx ? 'reabrir_dia' : 'fechar_dia', { p_data:d })); render(); } catch (e) { falha(e); }
   };
   $('#fDia').onsubmit = async e => { e.preventDefault(); try { await q(sb.from('dias_producao').update(ler(e.target, F_DIA)).eq('data', d)); render(); } catch (er) { falha(er); } };
   const fD = $('#fDiarista');
@@ -268,6 +354,8 @@ async function telaDia() {
   fL.onsubmit = async e => { e.preventDefault(); try {
     const o = ler(fL, F_LOTE);
     if (o.carcacas_contadas == null && (o.qtd_caixas == null || o.aves_por_caixa == null)) return alert('Informe caixas e aves por caixa, ou as carcaças contadas.');
+    if (o.status === 'finalizado' && !o.hora_termino) return alert('Para finalizar o lote, informe a hora de término.');
+    o.finalizado_em = o.status === 'finalizado' ? new Date().toISOString() : null;
     if (editando) await q(sb.from('lotes').update(o).eq('id', editando));
     else await q(sb.from('lotes').insert({ ...o, data:d, codigo:`${d.replaceAll('-', '')}-${String(o.ordem).padStart(2, '0')}` }));
     render(); } catch (er) { falha(er); } };
@@ -278,9 +366,30 @@ async function telaDia() {
     if (t.dataset.edit) { const l = lotes.find(x => x.id === Number(t.dataset.edit)); editando = l.id;
       $('#tLote').textContent = 'Editando lote ' + l.codigo; fL.querySelector('.grid').innerHTML = campos(F_LOTE, l); $('#bLimpar').hidden = false; $('#cLote').scrollIntoView({ behavior:'smooth' }); travaCarcacas(); }
     if (t.id === 'bLimpar') render();
+    if (t.dataset.plano) { st.planoLote = Number(t.dataset.plano); await render(); const c = $('#cPlano'); if (c) c.scrollIntoView({ behavior:'smooth' }); }
+    if (t.id === 'bFecharPlano') { st.planoLote = null; render(); }
+    if (t.dataset.st) { const [id, novo] = t.dataset.st.split(':'), l = lotes.find(x => x.id === Number(id)), agora = new Date().toTimeString().slice(0, 5), up = { status:novo, finalizado_em:null };
+      if (novo === 'em_producao' && !l.hora_inicio) up.hora_inicio = agora;
+      if (novo === 'finalizado') {
+        if (!confirm(`Finalizar o lote ${l.codigo}?\n\nConfira antes: mortos na chegada (${l.mortos_chegada}), condenadas (${l.condenadas}) e cabeças pagantes (${l.cabecas_pagantes}).`)) return;
+        if (!l.hora_termino) up.hora_termino = agora; up.finalizado_em = new Date().toISOString(); }
+      try { await q(sb.from('lotes').update(up).eq('id', id)); render(); } catch (er) { falha(er); } }
     if (t.id === 'bIrMes') { st.mes = d.slice(0, 7); st.tab = 'mes'; render(); }
-    if (t.dataset.rel) relatorio(lotes.find(x => x.id === Number(t.dataset.rel)), cd, lotes, custoLote);
+    if (t.dataset.rel) { const l = lotes.find(x => x.id === Number(t.dataset.rel)); relatorio(l, cd, lotes, custoLote, planosDe(l.id), fx); }
   };
+  const fP = $('#fPlano');
+  if (fP) {
+    const alternaCortes = () => { $('#pCortes').hidden = fP.elements.destino.value === 'inteiro'; };
+    fP.elements.destino.onchange = alternaCortes;
+    fP.onsubmit = async e => { e.preventDefault(); try {
+      const cortes = fP.elements.destino.value === 'cortes';
+      const o = { lote_id:lp.id, aves:Number(fP.elements.aves.value), destino:fP.elements.destino.value, conservacao:fP.elements.conservacao.value, observacao:fP.elements.observacao.value.trim() || null,
+        peito: cortes ? fP.elements.peito.value || null : null, perna: cortes ? fP.elements.perna.value || null : null, asa: cortes ? fP.elements.asa.value || null : null,
+        dorso: cortes && fP.elements.dorso.checked, miudos: cortes ? MIUDOS.map(m => m[0]).filter(v => fP.elements['miudo_' + v].checked) : [] };
+      if (cortes && !produtosDoPlano(o).length) return alert('Escolha ao menos um corte para entregar.');
+      if (noPlano(lp.id) + o.aves > lp.cabecas_pagantes && !confirm('Com esta linha o plano passa do total de aves do lote. Incluir mesmo assim?')) return;
+      await q(sb.from('lote_planos').insert(o)); render(); } catch (er) { falha(er); } };
+  }
 }
 
 async function abrirDia() {
@@ -295,11 +404,12 @@ async function abrirDia() {
 }
 
 // ───────── RELATÓRIO DO LOTE (impressão / PDF) ─────────
-function relatorio(l, cd, lotes, custoLote) {
+function relatorio(l, cd, lotes, custoLote, planos, fechado) {
   const porCab = cd.custo_total / cd.cabecas_dia, part = l.cabecas_pagantes / cd.cabecas_dia, semMensal = !Number(cd.parcela_custos_mensais);
   const linha = (nome, v) => `<tr><td>${nome}</td><td class="n">${brl(v)}</td><td class="n">${brl(v * part)}</td></tr>`;
   $('#rel').innerHTML = `
     <img src="logo.svg" alt="Fort Aves" style="height:48px"><p>Abatedouro · Relatório de custo operacional do lote</p>
+    ${fechado ? '' : '<p class="previa">PRÉVIA · dia ainda não fechado, valores sujeitos a alteração</p>'}
     <h2>Lote ${esc(l.codigo)}</h2>
     <table><tr><td>Cooperado</td><td><b>${esc(nomeDe('cooperados', l.cooperado_id))}</b></td><td>Data do abate</td><td><b>${dataBR(l.data)}</b></td></tr>
       <tr><td>Tipo de ave</td><td>${esc((st.ref.tipos_ave.find(t => t.codigo === l.tipo_ave) || {}).nome || l.tipo_ave)}</td><td>Veículo / motorista</td><td>${esc(nomeDe('veiculos', l.veiculo_id, 'placa'))} / ${esc(nomeDe('motoristas', l.motorista_id))}</td></tr>
@@ -307,6 +417,11 @@ function relatorio(l, cd, lotes, custoLote) {
       <tr><td>Aves recebidas</td><td>${num(l.aves_recebidas)}</td><td>Peso médio</td><td>${l.peso_liquido_kg && l.aves_recebidas ? num(l.peso_liquido_kg / l.aves_recebidas, 2) + ' kg' : '—'}</td></tr>
       <tr><td>Mortos na chegada</td><td>${num(l.mortos_chegada)}</td><td>Condenadas (SIE)</td><td>${num(l.condenadas)}</td></tr>
       <tr><td>Cabeças pagantes</td><td><b>${num(l.cabecas_pagantes)}</b>${l.carcacas_contadas != null ? ' (contagem de carcaças)' : ''}</td><td>Horário</td><td>${(l.hora_inicio || '').slice(0, 5)} – ${(l.hora_termino || '').slice(0, 5)}</td></tr></table>
+    ${!planos.length ? '' : `<h2>Plano de cortes</h2>
+    <table><tr><th class="n">Aves</th><th>Entrega</th><th>Conservação</th></tr>
+      ${planos.map(p => `<tr><td class="n">${num(p.aves)}</td><td style="white-space:normal">${esc(descPlano(p, l.tipo_ave))}</td><td>${p.conservacao === 'congelado' ? 'Congelado' : 'Resfriado'}</td></tr>`).join('')}</table>
+    <h2>Produção prevista</h2>${tabelaPrevisao(l, planos)}
+    <p style="font-size:11px">Previsão calculada pelo peso médio vivo do lote e pelos rendimentos de referência do abatedouro; o peso real de cada produto pode variar.</p>`}
     <h2>Custo operacional do dia e parcela do lote</h2>
     <p>Cabeças abatidas no dia: ${num(cd.cabecas_dia)} em ${lotes.length} lote(s). Participação deste lote: ${num(part * 100, 2)}%.</p>
     <table><tr><th>Item</th><th class="n">Custo do dia</th><th class="n">Parcela do lote</th></tr>
@@ -359,13 +474,14 @@ async function telaMes() {
   <div class="card"><h2>Contas reais de energia e água (fim do mês)</h2>
     <p class="mut">Lance quando as contas chegarem. A diferença para o que já foi cobrado nos dias de abate vira o complemento mensal abaixo.</p>
     <form id="fMes"><div class="grid">${campos(F_MES, c)}</div><p><button class="b">Salvar contas</button></p></form></div>
-  <div class="card"><h2>Complemento mensal de energia e água</h2>
-    <p class="mut">Conta real menos o que já foi cobrado nos dias de abate, rateado por cabeça abatida no mês.</p>
+  <div class="card"><h2>Complemento mensal</h2>
+    <p class="mut">Energia e água: conta real menos o que já foi cobrado nos dias de abate. Custos fixos: diária que não entrou em dias fechados antes de os custos fixos serem informados. Tudo rateado por cabeça abatida no mês.</p>
     <div class="kpis" style="margin-bottom:12px">
       <div class="kpi"><small>Energia já cobrada nos dias</small><b>${brl(dias.reduce((s, x) => s + Number(x.custo_energia), 0))}</b></div>
       <div class="kpi"><small>Complemento de energia</small><b>${brl(vm?.complemento_energia)}</b></div>
       <div class="kpi"><small>Água já cobrada nos dias</small><b>${brl(dias.reduce((s, x) => s + Number(x.custo_agua), 0))}</b></div>
       <div class="kpi"><small>Complemento de água</small><b>${brl(vm?.complemento_agua)}</b></div>
+      <div class="kpi"><small>Complemento de custos fixos</small><b>${brl(vm?.complemento_fixos)}</b></div>
       <div class="kpi"><small>Cabeças no mês</small><b>${num(vm?.cabecas_mes)}</b></div></div>
     <div class="scroll"><table><tr><th>Cooperado</th><th class="n">Cabeças no mês</th><th class="n">Complemento</th></tr>
     ${vc.map(x => `<tr><td>${esc(nomeDe('cooperados', x.cooperado_id))}</td><td class="n">${num(x.cabecas)}</td><td class="n"><b>${brl(x.complemento)}</b></td></tr>`).join('') || '<tr><td colspan="3" class="mut">Sem lotes no mês.</td></tr>'}</table></div></div>
@@ -396,10 +512,25 @@ const CAD = {
   funcionarios: { nome:'Equipe', f:[{ k:'nome', label:'Nome', req:true }, { k:'vinculo', label:'Vínculo', type:'select', req:true, options:() => [['diarista', 'Diarista'], ['fixo', 'Fixo (mensalista)']] },
                   { k:'funcao', label:'Função' }, { k:'valor_diaria', label:'Diária (R$)', type:'number' }, { k:'salario_mensal', label:'Custo mensal (R$)', type:'number' }, { k:'ativo', label:'Ativo', type:'checkbox' }] } };
 
+const abasCad = () => `<div class="card row">${Object.entries(CAD).map(([k, v]) => `<button class="b ${k === st.cad ? '' : 'sec'}" data-cad="${k}">${v.nome}</button>`).join('')}<button class="b ${st.cad === 'rendimentos' ? '' : 'sec'}" data-cad="rendimentos">Rendimentos</button></div>`;
+function telaRendimentos() {
+  const tipos = st.ref.tipos_ave;
+  main.innerHTML = abasCad() + `<div class="card"><h2>Rendimentos por produto (% do peso vivo)</h2>
+    <p class="mut">Usados na previsão do plano de cortes. Valores iniciais da referência técnica Cobb500 Broiler Yield (ave de 2,73 kg, peso seco antes do chiller), conferidos com a Embrapa. Galetinho e frango caipira começam iguais ao frango grande e devem ser ajustados conforme a pesagem real do abatedouro. A alteração é gravada ao sair do campo.</p>
+    <div class="scroll"><table><tr><th>Produto</th>${tipos.map(t => `<th class="n">${esc(t.codigo)} · ${esc(t.nome)}</th>`).join('')}</tr>
+    ${st.ref.produtos.map(p => `<tr><td>${esc(p.nome)}</td>${tipos.map(t => `<td class="n"><input type="number" step="0.01" min="0" max="100" style="width:90px;text-align:right" data-rend="${t.codigo}:${p.codigo}" value="${pctDe(t.codigo, p.codigo)}"></td>`).join('')}</tr>`).join('')}
+    </table></div><p class="msg" id="rMsg" style="color:var(--pri)"></p></div>`;
+  main.onclick = e => { if (e.target.dataset.cad) { st.cad = e.target.dataset.cad; render(); } };
+  main.onchange = async e => { const t = e.target; if (!t.dataset.rend) return;
+    const [tipo_ave, produto] = t.dataset.rend.split(':'), pct = Number(t.value);
+    if (!(pct >= 0 && pct <= 100)) return alert('Informe um percentual entre 0 e 100.');
+    try { await q(sb.from('rendimentos').upsert({ tipo_ave, produto, pct })); st.ref.rendimentos = await q(sb.from('rendimentos').select('*')); $('#rMsg').textContent = `Gravado: ${nomeProduto(produto)} (${tipo_ave}) = ${num(pct, 2)}%`; } catch (er) { falha(er); } };
+}
 function telaCad() {
+  if (st.cad === 'rendimentos') return telaRendimentos();
   const c = CAD[st.cad], lista = st.ref[st.cad];
   const cel = (x, f) => f.type === 'checkbox' ? (x[f.k] ? 'sim' : 'não') : f.type === 'number' ? num(x[f.k], 2) : esc(x[f.k]);
-  main.innerHTML = `<div class="card row">${Object.entries(CAD).map(([k, v]) => `<button class="b ${k === st.cad ? '' : 'sec'}" data-cad="${k}">${v.nome}</button>`).join('')}</div>
+  main.innerHTML = abasCad() + `
   <div class="card"><h2>${c.nome}</h2><div class="scroll"><table><tr>${c.f.map(f => `<th>${f.label}</th>`).join('')}<th></th></tr>
     ${lista.map(x => `<tr>${c.f.map(f => `<td>${cel(x, f)}</td>`).join('')}<td><button class="lnk" data-edit="${x.id}">editar</button></td></tr>`).join('') || `<tr><td colspan="${c.f.length + 1}" class="mut">Nenhum registro.</td></tr>`}</table></div>
     <h2 style="margin-top:16px" id="tCad">Novo registro</h2>
