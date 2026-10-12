@@ -66,6 +66,7 @@
     <label>Senha <input type="password" id="lSenha" required autocomplete="current-password"></label>
     <button class="b" type="submit">Entrar</button>
     <button class="lnk" type="button" id="bPrimeiro" style="margin-left:10px">Primeiro acesso</button>
+    <button class="lnk" type="button" id="bEsqueci" style="margin-left:6px">Esqueci a senha</button>
     <p class="msg" id="lMsg"></p>
   </form>
   <form id="fPrimeiro" hidden>
@@ -440,18 +441,40 @@ $('#fLogin').onsubmit = async e => {
   const { error } = await sb.auth.signInWithPassword({ email:$('#lEmail').value.trim(), password:$('#lSenha').value });
   if (error) $('#lMsg').textContent = /not confirmed/i.test(error.message) ? 'Confirme seu e-mail antes de entrar (veja a caixa de entrada).' : 'E-mail ou senha inválidos.';
 };
+$('#bEsqueci').onclick = async () => {
+  const m = $('#lMsg'), email = $('#lEmail').value.trim().toLowerCase(); m.style.color = '';
+  if (!email) return m.textContent = 'Digite o seu e-mail no campo acima e clique de novo em "Esqueci a senha".';
+  const { error } = await sb.auth.resetPasswordForEmail(email);
+  if (error) return m.textContent = 'Não foi possível enviar o e-mail: ' + error.message;
+  m.style.color = 'var(--pri)'; m.textContent = 'Se este e-mail tiver acesso, enviamos um link para criar uma nova senha. Confira a caixa de entrada e o spam.';
+};
+function telaNovaSenha() {
+  $('#nav').hidden = true;
+  main.innerHTML = `<div class="card" style="max-width:360px;margin:6vh auto"><h2>Criar nova senha</h2><form id="fNova">
+    <label style="margin-bottom:10px">Nova senha (mínimo 8 caracteres) <input type="password" name="s1" required minlength="8" autocomplete="new-password"></label>
+    <label style="margin-bottom:10px">Repita a senha <input type="password" name="s2" required minlength="8" autocomplete="new-password"></label>
+    <button class="b">Salvar nova senha</button><p class="msg" id="nMsg"></p></form></div>`;
+  const f = $('#fNova');
+  f.onsubmit = async e => { e.preventDefault();
+    if (f.elements.s1.value !== f.elements.s2.value) return $('#nMsg').textContent = 'As senhas não conferem.';
+    const { error } = await sb.auth.updateUser({ password:f.elements.s1.value });
+    if (error) return $('#nMsg').textContent = 'Não foi possível salvar: ' + error.message;
+    alert('Senha alterada.'); location.href = location.pathname;
+  };
+}
 const alterna = primeiro => { $('#fLogin').hidden = primeiro; $('#fPrimeiro').hidden = !primeiro; };
 $('#bPrimeiro').onclick = () => alterna(true);
 $('#bVoltar').onclick = () => alterna(false);
 $('#fPrimeiro').onsubmit = async e => {
   e.preventDefault(); const m = $('#pMsg'); m.textContent = '';
   if ($('#pSenha').value !== $('#pSenha2').value) return m.textContent = 'As senhas não conferem.';
-  const { data, error } = await sb.auth.signUp({ email:$('#pEmail').value.trim().toLowerCase(), password:$('#pSenha').value, options:{ emailRedirectTo:location.origin + location.pathname } });
+  const { data, error } = await sb.auth.signUp({ email:$('#pEmail').value.trim().toLowerCase(), password:$('#pSenha').value });
   if (error) return m.textContent = 'Não foi possível criar o acesso: ' + error.message;
   if (!data.session) { m.style.color = 'var(--pri)'; m.textContent = 'Enviamos um e-mail de confirmação. Abra-o, clique no link e depois entre com a sua senha.'; }
 };
 let logado;
-sb.auth.onAuthStateChange((_ev, sess) => {
+sb.auth.onAuthStateChange((ev, sess) => {
+  if (ev === 'PASSWORD_RECOVERY') { st.recuperar = true; if (logado) telaNovaSenha(); }
   const id = sess?.user?.id || null;
   if (id === logado) return; logado = id;
   $('#login').hidden = !!sess; $('#top').hidden = !sess; main.hidden = !sess;
@@ -461,6 +484,7 @@ sb.auth.onAuthStateChange((_ev, sess) => {
       st.perfil = p && p.email ? p : null;
       $('#uEmail').textContent = st.perfil ? `${st.perfil.nome || st.perfil.email} · ${PAPEL[st.perfil.papel]}` : sess.user.email;
       $('#nav').hidden = !st.perfil; $('#nvUsu').hidden = !st.perfil || st.perfil.papel !== 'admin';
+      if (st.recuperar) return telaNovaSenha();
       if (!st.perfil) return main.innerHTML = `<div class="card"><h2>Acesso não autorizado</h2><p>O e-mail <b>${esc(sess.user.email)}</b> ainda não foi autorizado a usar o sistema. Peça ao administrador para incluí-lo em "Usuários".</p></div>`;
       await carregarRef(); render();
     } catch (e) { falha(e); }
