@@ -162,7 +162,7 @@ const F_LOTE = [
   { k:'qtd_caixas', label:'Qtd. de caixas', type:'number', step:1 }, { k:'aves_por_caixa', label:'Aves por caixa', type:'number', step:1 },
   { k:'mortos_chegada', label:'Mortos na chegada', type:'number', step:1, zero:true, def:0 },
   { k:'condenadas', label:'Condenadas (SIE)', type:'number', step:1, zero:true, def:0 },
-  { k:'carcacas_contadas', label:'Carcaças contadas (sem pesagem)', type:'number', step:1 },
+  { k:'carcacas_contadas', label:'Carcaças contadas (só lote sem pesagem)', type:'number', step:1 },
   { k:'velocidade_hz', label:'Velocidade (Hz)', type:'number' },
   { k:'hora_inicio', label:'Início', type:'time' }, { k:'hora_termino', label:'Término', type:'time' },
   { k:'minutos_parada', label:'Parada (min)', type:'number', step:1, zero:true, def:0 }, { k:'observacao', label:'Observação' }];
@@ -185,6 +185,8 @@ async function telaDia() {
     $('#bAbrir').onclick = abrirDia;
     return;
   }
+  const diaristasCad = ativos('funcionarios').filter(f => f.vinculo === 'diarista');
+  const acharDiarista = nome => diaristasCad.find(f => f.nome.trim().toLowerCase() === nome.trim().toLowerCase());
   const fx = dia.fechado, porCab = cd.cabecas_dia ? cd.custo_total / cd.cabecas_dia : null, semMensal = !Number(cd.parcela_custos_mensais);
   const custoLote = id => (cl.find(x => x.lote_id === id) || {}).custo_lote;
   main.innerHTML = topo + `
@@ -210,10 +212,12 @@ async function telaDia() {
       <td>${fx ? '' : `<button class="lnk" data-del="dia_diaristas:${x.id}">remover</button>`}</td></tr>`).join('') || '<tr><td colspan="4" class="mut">Nenhum diarista lançado.</td></tr>'}
     </table></div>
     <form id="fDiarista" class="row" style="margin-top:10px">
-      <label>Diarista <select name="funcionario_id" required ${fx ? 'disabled' : ''}><option value=""></option>${ativos('funcionarios').filter(f => f.vinculo === 'diarista').map(f => `<option value="${f.id}" data-v="${f.valor_diaria ?? ''}" data-f="${esc(f.funcao)}">${esc(f.nome)}</option>`).join('')}</select></label>
-      <label>Função <input name="funcao" ${fx ? 'disabled' : ''}></label>
+      <label>Nome do diarista <input name="nome" list="dlDiar" required autocomplete="off" placeholder="digite ou escolha" ${fx ? 'disabled' : ''}>
+        <datalist id="dlDiar">${diaristasCad.map(f => `<option value="${esc(f.nome)}"></option>`).join('')}</datalist></label>
+      <label>Função (opcional) <input name="funcao" ${fx ? 'disabled' : ''}></label>
       <label>Valor (R$) <input name="valor" type="number" step="0.01" required ${fx ? 'disabled' : ''}></label>
-      <button class="b sec" ${fx ? 'disabled' : ''}>Adicionar</button></form></div>
+      <button class="b sec" ${fx ? 'disabled' : ''}>Adicionar</button></form>
+    <p class="mut" style="margin:8px 0 0">Nome novo é incluído automaticamente no cadastro de equipe como diarista.</p></div>
 
   <div class="card"><h2>Limpeza e outros custos do dia</h2><div class="scroll"><table>
     <tr><th>Categoria</th><th>Descrição</th><th class="n">Valor</th><th></th></tr>
@@ -234,8 +238,9 @@ async function telaDia() {
       <td class="n">${num(l.mortos_chegada)}</td><td class="n">${num(l.condenadas)}</td><td class="n">${num(l.cabecas_pagantes)}</td>
       <td class="n"><b>${brl(custoLote(l.id))}</b></td>
       <td><button class="lnk" data-rel="${l.id}">relatório</button>${fx ? '' : `<button class="lnk" data-edit="${l.id}">editar</button><button class="lnk" data-del="lotes:${l.id}">excluir</button>`}</td></tr>`).join('') || '<tr><td colspan="11" class="mut">Nenhum lote lançado.</td></tr>'}
-    </table></div>
-    <h2 style="margin-top:16px" id="tLote">Novo lote</h2>
+    </table></div></div>
+
+  <div class="card" id="cLote"><h2 id="tLote">Novo lote</h2>
     <form id="fLote"><div class="grid">${campos(F_LOTE, { ordem: (lotes.at(-1)?.ordem || 0) + 1 }, fx)}</div>
       <p><button class="b" ${fx ? 'disabled' : ''}>Salvar lote</button> <button type="button" class="b sec" id="bLimpar" hidden>Cancelar edição</button></p></form></div>`;
 
@@ -246,14 +251,19 @@ async function telaDia() {
   };
   $('#fDia').onsubmit = async e => { e.preventDefault(); try { await q(sb.from('dias_producao').update(ler(e.target, F_DIA)).eq('data', d)); render(); } catch (er) { falha(er); } };
   const fD = $('#fDiarista');
-  fD.elements.funcionario_id.onchange = e => { const o = e.target.selectedOptions[0]; fD.elements.valor.value = o.dataset.v || ''; fD.elements.funcao.value = o.dataset.f || ''; };
+  fD.elements.nome.onchange = e => { const c = acharDiarista(e.target.value); if (c) { if (c.valor_diaria != null) fD.elements.valor.value = c.valor_diaria; fD.elements.funcao.value = c.funcao || ''; } };
   fD.onsubmit = async e => { e.preventDefault(); try {
-    await q(sb.from('dia_diaristas').insert({ data:d, funcionario_id:Number(fD.elements.funcionario_id.value), funcao:fD.elements.funcao.value || null, valor:Number(fD.elements.valor.value) })); render(); } catch (er) { falha(er); } };
+    const nome = fD.elements.nome.value.trim(), funcao = fD.elements.funcao.value.trim() || null, valor = Number(fD.elements.valor.value);
+    let c = acharDiarista(nome);
+    if (!c) { c = await q(sb.from('funcionarios').insert({ nome, vinculo:'diarista', funcao, valor_diaria:valor }).select().single()); await carregarRef(); }
+    await q(sb.from('dia_diaristas').insert({ data:d, funcionario_id:c.id, funcao, valor })); render(); } catch (er) { falha(/duplicate|unique/i.test(er.message) ? new Error('Este diarista já está lançado neste dia.') : er); } };
   const fC = $('#fCusto');
   fC.onsubmit = async e => { e.preventDefault(); try {
     await q(sb.from('dia_custos').insert({ data:d, categoria:fC.elements.categoria.value, descricao:fC.elements.descricao.value || null, valor:Number(fC.elements.valor.value) })); render(); } catch (er) { falha(er); } };
 
   const fL = $('#fLote'); let editando = null;
+  const travaCarcacas = () => { const el = fL.elements.carcacas_contadas, pesado = fL.elements.peso_bruto_kg.value !== ''; if (pesado) el.value = ''; el.disabled = pesado || fx; };
+  fL.oninput = e => { if (e.target.name === 'peso_bruto_kg') travaCarcacas(); };
   fL.elements.veiculo_id.onchange = e => { const v = st.ref.veiculos.find(x => x.id === Number(e.target.value)); if (v && v.tara_kg != null && !fL.elements.tara_kg.value) fL.elements.tara_kg.value = v.tara_kg; };
   fL.onsubmit = async e => { e.preventDefault(); try {
     const o = ler(fL, F_LOTE);
@@ -266,7 +276,7 @@ async function telaDia() {
     if (t.dataset.del) { const [tab, id] = t.dataset.del.split(':'); if (!confirm('Confirma a exclusão deste lançamento?')) return;
       try { await q(sb.from(tab).delete().eq('id', id)); render(); } catch (er) { falha(er); } }
     if (t.dataset.edit) { const l = lotes.find(x => x.id === Number(t.dataset.edit)); editando = l.id;
-      $('#tLote').textContent = 'Editando lote ' + l.codigo; fL.querySelector('.grid').innerHTML = campos(F_LOTE, l); $('#bLimpar').hidden = false; fL.scrollIntoView({ behavior:'smooth' }); }
+      $('#tLote').textContent = 'Editando lote ' + l.codigo; fL.querySelector('.grid').innerHTML = campos(F_LOTE, l); $('#bLimpar').hidden = false; $('#cLote').scrollIntoView({ behavior:'smooth' }); travaCarcacas(); }
     if (t.id === 'bLimpar') render();
     if (t.id === 'bIrMes') { st.mes = d.slice(0, 7); st.tab = 'mes'; render(); }
     if (t.dataset.rel) relatorio(lotes.find(x => x.id === Number(t.dataset.rel)), cd, lotes, custoLote);
