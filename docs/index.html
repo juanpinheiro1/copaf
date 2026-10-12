@@ -65,7 +65,17 @@
     <label>E-mail <input type="email" id="lEmail" required autocomplete="username"></label>
     <label>Senha <input type="password" id="lSenha" required autocomplete="current-password"></label>
     <button class="b" type="submit">Entrar</button>
+    <button class="lnk" type="button" id="bPrimeiro" style="margin-left:10px">Primeiro acesso</button>
     <p class="msg" id="lMsg"></p>
+  </form>
+  <form id="fPrimeiro" hidden>
+    <p class="mut">Use o e-mail que o administrador autorizou e crie a sua senha. Você receberá um e-mail para confirmar o endereço.</p>
+    <label>E-mail <input type="email" id="pEmail" required autocomplete="username"></label>
+    <label>Senha (mínimo 8 caracteres) <input type="password" id="pSenha" required minlength="8" autocomplete="new-password"></label>
+    <label>Repita a senha <input type="password" id="pSenha2" required minlength="8" autocomplete="new-password"></label>
+    <button class="b" type="submit">Criar senha</button>
+    <button class="lnk" type="button" id="bVoltar" style="margin-left:10px">Voltar</button>
+    <p class="msg" id="pMsg"></p>
   </form>
 </div>
 
@@ -75,6 +85,7 @@
     <button data-tab="dia">Dia de produção</button>
     <button data-tab="mes">Fechamento mensal</button>
     <button data-tab="cad">Cadastros</button>
+    <button data-tab="usu" id="nvUsu" hidden>Usuários</button>
   </nav>
   <span class="user"><span id="uEmail"></span> · <button class="lnk" id="bSair">sair</button></span>
 </header>
@@ -90,7 +101,7 @@ const brl = v => v == null ? '—' : Number(v).toLocaleString('pt-BR', { style:'
 const num = (v, d = 0) => v == null ? '—' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits:d, maximumFractionDigits:d });
 const dataBR = d => d ? d.split('-').reverse().join('/') : '';
 const hoje = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
-const st = { tab:'dia', data:hoje(), mes:hoje().slice(0, 7), cad:'cooperados', ref:{} };
+const st = { perfil:null, tab:'dia', data:hoje(), mes:hoje().slice(0, 7), cad:'cooperados', ref:{} };
 
 async function q(p) { const { data, error } = await p; if (error) throw new Error(error.message); return data; }
 function falha(e) { alert('Erro: ' + e.message); }
@@ -387,11 +398,39 @@ function telaCad() {
   };
 }
 
+// ───────── USUÁRIOS (só administrador) ─────────
+const PAPEL = { operador:'Operador', admin:'Administrador' };
+async function telaUsuarios() {
+  const us = await q(sb.from('usuarios').select('*').order('criado_em'));
+  const eu = st.perfil.email, selPapel = (v, at = '') => `<select ${at}>${Object.entries(PAPEL).map(([k, l]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  main.innerHTML = `<div class="card"><h2>Usuários autorizados</h2><div class="scroll"><table>
+    <tr><th>E-mail</th><th>Nome</th><th>Papel</th><th>Situação</th><th></th></tr>
+    ${us.map(u => `<tr><td>${esc(u.email)}</td><td>${esc(u.nome)}</td>
+      <td>${u.email === eu ? PAPEL[u.papel] : selPapel(u.papel, `data-papel="${esc(u.email)}"`)}</td>
+      <td><span class="tag ${u.ativo ? 'ok' : ''}">${u.ativo ? 'ativo' : 'desativado'}</span></td>
+      <td>${u.email === eu ? '<span class="mut">você</span>' : `<button class="lnk" data-ativo="${esc(u.email)}" data-v="${!u.ativo}">${u.ativo ? 'desativar' : 'reativar'}</button>`}</td></tr>`).join('')}
+    </table></div>
+    <h2 style="margin-top:16px">Autorizar novo usuário</h2>
+    <form id="fUsu" class="row">
+      <label>E-mail <input name="email" type="email" required></label>
+      <label>Nome <input name="nome"></label>
+      <label>Papel ${selPapel('operador', 'name="papel"')}</label>
+      <button class="b">Autorizar</button></form>
+    <p class="mut">Depois de autorizada, a pessoa abre o sistema, clica em "Primeiro acesso", cria a própria senha e confirma o e-mail. Operador lança e consulta tudo; Administrador também gerencia os usuários.</p></div>`;
+  const f = $('#fUsu');
+  f.onsubmit = async e => { e.preventDefault(); try {
+    await q(sb.from('usuarios').insert({ email:f.elements.email.value.trim().toLowerCase(), nome:f.elements.nome.value.trim() || null, papel:f.elements.papel.value })); render(); } catch (er) { falha(er); } };
+  main.onclick = async e => { const t = e.target; if (!t.dataset.ativo) return;
+    try { await q(sb.from('usuarios').update({ ativo:t.dataset.v === 'true' }).eq('email', t.dataset.ativo)); render(); } catch (er) { falha(er); } };
+  main.onchange = async e => { const t = e.target; if (!t.dataset.papel) return;
+    try { await q(sb.from('usuarios').update({ papel:t.value }).eq('email', t.dataset.papel)); render(); } catch (er) { falha(er); } };
+}
+
 // ───────── navegação e sessão ─────────
 async function render() {
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === st.tab));
-  main.onclick = null;
-  try { await ({ dia:telaDia, mes:telaMes, cad:telaCad })[st.tab](); }
+  main.onclick = null; main.onchange = null;
+  try { await ({ dia:telaDia, mes:telaMes, cad:telaCad, usu:telaUsuarios })[st.tab](); }
   catch (e) { main.innerHTML = `<div class="card"><p class="msg">Erro ao carregar: ${esc(e.message)}</p></div>`; }
 }
 $('#nav').onclick = e => { if (e.target.dataset.tab) { st.tab = e.target.dataset.tab; render(); } };
@@ -399,14 +438,33 @@ $('#bSair').onclick = () => sb.auth.signOut();
 $('#fLogin').onsubmit = async e => {
   e.preventDefault(); $('#lMsg').textContent = '';
   const { error } = await sb.auth.signInWithPassword({ email:$('#lEmail').value.trim(), password:$('#lSenha').value });
-  if (error) $('#lMsg').textContent = 'E-mail ou senha inválidos.';
+  if (error) $('#lMsg').textContent = /not confirmed/i.test(error.message) ? 'Confirme seu e-mail antes de entrar (veja a caixa de entrada).' : 'E-mail ou senha inválidos.';
+};
+const alterna = primeiro => { $('#fLogin').hidden = primeiro; $('#fPrimeiro').hidden = !primeiro; };
+$('#bPrimeiro').onclick = () => alterna(true);
+$('#bVoltar').onclick = () => alterna(false);
+$('#fPrimeiro').onsubmit = async e => {
+  e.preventDefault(); const m = $('#pMsg'); m.textContent = '';
+  if ($('#pSenha').value !== $('#pSenha2').value) return m.textContent = 'As senhas não conferem.';
+  const { data, error } = await sb.auth.signUp({ email:$('#pEmail').value.trim().toLowerCase(), password:$('#pSenha').value, options:{ emailRedirectTo:location.origin + location.pathname } });
+  if (error) return m.textContent = 'Não foi possível criar o acesso: ' + error.message;
+  if (!data.session) { m.style.color = 'var(--pri)'; m.textContent = 'Enviamos um e-mail de confirmação. Abra-o, clique no link e depois entre com a sua senha.'; }
 };
 let logado;
 sb.auth.onAuthStateChange((_ev, sess) => {
   const id = sess?.user?.id || null;
   if (id === logado) return; logado = id;
   $('#login').hidden = !!sess; $('#top').hidden = !sess; main.hidden = !sess;
-  if (sess) { $('#uEmail').textContent = sess.user.email; setTimeout(async () => { try { await carregarRef(); render(); } catch (e) { falha(e); } }, 0); }
+  if (sess) setTimeout(async () => {
+    try {
+      const p = await q(sb.rpc('minha_autorizacao'));
+      st.perfil = p && p.email ? p : null;
+      $('#uEmail').textContent = st.perfil ? `${st.perfil.nome || st.perfil.email} · ${PAPEL[st.perfil.papel]}` : sess.user.email;
+      $('#nav').hidden = !st.perfil; $('#nvUsu').hidden = !st.perfil || st.perfil.papel !== 'admin';
+      if (!st.perfil) return main.innerHTML = `<div class="card"><h2>Acesso não autorizado</h2><p>O e-mail <b>${esc(sess.user.email)}</b> ainda não foi autorizado a usar o sistema. Peça ao administrador para incluí-lo em "Usuários".</p></div>`;
+      await carregarRef(); render();
+    } catch (e) { falha(e); }
+  }, 0);
 });
 </script>
 </body>
