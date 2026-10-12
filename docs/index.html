@@ -203,13 +203,14 @@ function comparativo(l, planos, pesagens) {
     return { codigo:p.codigo, nome:p.nome, foraDoPlano:aves[p.codigo] == null, prev: vivo != null ? vivo * pct / 100 : null, real:r, pctPrev:pct, pctReal: r != null && vivo ? 100 * r / vivo : null };
   });
 }
-function tabelaComparativo(l, planos, pesagens) {
+function tabelaComparativo(l, planos, pesagens, editavel = false) {
   const c = comparativo(l, planos, pesagens); if (!c.length) return '';
   const tp = c.reduce((a, x) => a + (x.prev || 0), 0), tr = c.reduce((a, x) => a + (x.real || 0), 0);
   const dif = x => x.real == null || x.prev == null ? '—' : (x.real - x.prev >= 0 ? '+' : '') + num(x.real - x.prev, 1);
-  return `<table><tr><th>Produto</th><th class="n">Previsto (kg)</th><th class="n">Pesado (kg)</th><th class="n">Diferença (kg)</th><th class="n">Rend. previsto</th><th class="n">Rend. real</th></tr>
-    ${c.map(x => `<tr><td>${esc(x.nome)}${x.foraDoPlano ? ' <span class="tag">fora do plano</span>' : ''}</td><td class="n">${x.prev == null ? '—' : num(x.prev, 1)}</td><td class="n">${x.real == null ? '<span class="mut">a pesar</span>' : num(x.real, 1)}</td><td class="n">${dif(x)}</td><td class="n">${num(x.pctPrev, 2)}%</td><td class="n">${x.pctReal == null ? '—' : num(x.pctReal, 2) + '%'}</td></tr>`).join('')}
-    <tr class="tot"><td><b>Total</b></td><td class="n"><b>${tp ? num(tp, 1) : '—'}</b></td><td class="n"><b>${num(tr, 1)}</b></td><td></td><td></td><td class="n"><b>${l.peso_liquido_kg && tr ? num(100 * tr / l.peso_liquido_kg, 2) + '% do peso vivo' : ''}</b></td></tr></table>`;
+  return `<table><tr><th>Produto</th><th class="n">Previsto (kg)</th><th class="n">Pesado (kg)</th><th class="n">Diferença (kg)</th><th class="n">Rend. previsto</th><th class="n">Rend. real</th>${editavel ? '<th></th>' : ''}</tr>
+    ${c.map(x => `<tr><td>${esc(x.nome)}${x.foraDoPlano ? ' <span class="tag">fora do plano</span>' : ''}</td><td class="n">${x.prev == null ? '—' : num(x.prev, 1)}</td><td class="n">${x.real == null ? '<span class="mut">a pesar</span>' : num(x.real, 1)}</td><td class="n">${dif(x)}</td><td class="n">${num(x.pctPrev, 2)}%</td><td class="n">${x.pctReal == null ? '—' : num(x.pctReal, 2) + '%'}</td>
+      ${editavel ? `<td class="n lanc" data-prod="${x.codigo}"><button class="b sec" style="padding:4px 10px" data-lancar="${x.codigo}">${x.real == null ? 'Lançar peso' : 'Somar peso'}</button></td>` : ''}</tr>`).join('')}
+    <tr class="tot"><td><b>Total</b></td><td class="n"><b>${tp ? num(tp, 1) : '—'}</b></td><td class="n"><b>${num(tr, 1)}</b></td><td></td><td></td><td class="n"><b>${l.peso_liquido_kg && tr ? num(100 * tr / l.peso_liquido_kg, 2) + '% do peso vivo' : ''}</b></td>${editavel ? '<td></td>' : ''}</tr></table>`;
 }
 
 // ───────── DIA DE PRODUÇÃO ─────────
@@ -356,17 +357,19 @@ async function telaDia() {
       <div class="kpi"><small>Peso vivo do lote</small><b>${lw.peso_liquido_kg ? num(lw.peso_liquido_kg, 0) + ' kg' : 'sem pesagem'}</b></div>
       <div class="kpi"><small>Total pesado na saída</small><b>${num(pesado(lw.id), 1)} kg</b></div>
       <div class="kpi big"><small>Rendimento geral do lote</small><b>${lw.peso_liquido_kg && pesado(lw.id) ? num(100 * pesado(lw.id) / lw.peso_liquido_kg, 2) + '%' : '—'}</b></div></div>
-    ${tabelaComparativo(lw, planosDe(lw.id), pesagensDe(lw.id)) || '<p class="mut">Monte o plano de cortes ou lance a primeira pesagem para ver a comparação.</p>'}
-    <h2 style="margin-top:16px">Lançar pesagem</h2>
-    <form id="fPeso" class="row">
+    <p class="mut">Clique em "Lançar peso" na linha do produto, digite os kg e tecle Enter. O sistema já abre o próximo produto a pesar.</p>
+    <div class="scroll">${tabelaComparativo(lw, planosDe(lw.id), pesagensDe(lw.id), true) || '<p class="mut">Este lote ainda não tem plano de cortes. Monte o plano para lançar o peso direto em cada produto, ou use o lançamento avulso abaixo.</p>'}</div>
+    <p style="margin:12px 0 0"><button type="button" class="b sec" id="bFecharPeso">Fechar painel</button></p>
+    <details style="margin-top:12px"><summary class="mut" style="cursor:pointer">Lançar produto que não está no plano</summary>
+    <form id="fPeso" class="row" style="margin-top:10px">
       <label>Produto <select name="produto" required>${(() => { const noPlano = Object.keys(avesPorProduto(planosDe(lw.id))), op = p => `<option value="${p.codigo}">${esc(p.nome)}</option>`;
         return (noPlano.length ? `<optgroup label="No plano do lote">${st.ref.produtos.filter(p => noPlano.includes(p.codigo)).map(op).join('')}</optgroup>` : '') + `<optgroup label="Outros produtos">${st.ref.produtos.filter(p => !noPlano.includes(p.codigo)).map(op).join('')}</optgroup>`; })()}</select></label>
       <label>Conservação <select name="conservacao"><option value="resfriado">Resfriado</option><option value="congelado">Congelado</option></select></label>
       <label>Peso (kg) <input name="peso_kg" type="number" step="0.01" min="0.01" required></label>
       <label>Volumes (caixas/pacotes) <input name="volumes" type="number" step="1" min="1"></label>
       <label>Observação <input name="observacao"></label>
-      <button class="b">Adicionar pesagem</button> <button type="button" class="b sec" id="bFecharPeso">Fechar painel</button></form>
-    <p class="mut" style="margin:8px 0 0">Cada anotação da produção vira um lançamento; pesagens do mesmo produto são somadas. A pesagem pode ser lançada mesmo depois de o dia estar fechado, pois não altera o custo.</p>
+      <button class="b">Adicionar pesagem</button></form></details>
+    <p class="mut" style="margin:8px 0 0">Cada peso salvo vira um lançamento; pesos do mesmo produto são somados. Para corrigir, remova o lançamento na lista abaixo e lance de novo. A pesagem pode ser lançada mesmo depois de o dia estar fechado, pois não altera o custo.</p>
     <h2 style="margin-top:16px">Lançamentos</h2>
     <div class="scroll"><table><tr><th>Lançado em</th><th>Produto</th><th>Conservação</th><th class="n">Peso (kg)</th><th class="n">Volumes</th><th>Observação</th><th></th></tr>
     ${pesagensDe(lw.id).map(w => `<tr><td>${new Date(w.criado_em).toLocaleString('pt-BR', { dateStyle:'short', timeStyle:'short' })}</td><td>${esc(nomeProduto(w.produto))}</td><td>${w.conservacao === 'congelado' ? 'Congelado' : 'Resfriado'}</td>
@@ -417,6 +420,8 @@ async function telaDia() {
     if (t.id === 'bFecharPlano') { st.planoLote = null; render(); }
     if (t.dataset.peso) { st.pesoLote = Number(t.dataset.peso); await render(); const c = $('#cPeso'); if (c) c.scrollIntoView({ behavior:'smooth' }); }
     if (t.id === 'bFecharPeso') { st.pesoLote = null; render(); }
+    if (t.dataset.lancar) abrirLanc(t.dataset.lancar);
+    if (t.dataset.cancelar) render();
     if (t.dataset.st) { const [id, novo] = t.dataset.st.split(':'), l = lotes.find(x => x.id === Number(id)), agora = new Date().toTimeString().slice(0, 5), up = { status:novo, finalizado_em:null };
       if (novo === 'em_producao' && !l.hora_inicio) up.hora_inicio = agora;
       if (novo === 'finalizado') {
@@ -426,6 +431,25 @@ async function telaDia() {
     if (t.id === 'bIrMes') { st.mes = d.slice(0, 7); st.tab = 'mes'; render(); }
     if (t.dataset.rel) { const l = lotes.find(x => x.id === Number(t.dataset.rel)); relatorio(l, cd, lotes, custoLote, planosDe(l.id), fx, pesagensDe(l.id)); }
   };
+  // campo de peso aberto na própria linha do produto
+  function abrirLanc(cod) {
+    const td = main.querySelector(`td.lanc[data-prod="${cod}"]`); if (!td || !lw) return;
+    main.querySelectorAll('td.lanc form').forEach(x => { const c = x.parentElement.dataset.prod; x.parentElement.innerHTML = `<button class="b sec" style="padding:4px 10px" data-lancar="${c}">Lançar peso</button>`; });
+    const cons = (planosDe(lw.id).find(p => produtosDoPlano(p).includes(cod)) || {}).conservacao || 'resfriado';
+    td.innerHTML = `<form class="row" style="gap:6px;justify-content:flex-end;flex-wrap:nowrap;align-items:center">
+      <input name="peso_kg" type="number" step="0.01" min="0.01" required placeholder="kg" style="width:96px;text-align:right">
+      <input name="volumes" type="number" step="1" min="1" placeholder="volumes" style="width:86px;text-align:right">
+      <select name="conservacao"><option value="resfriado" ${cons === 'resfriado' ? 'selected' : ''}>Resfriado</option><option value="congelado" ${cons === 'congelado' ? 'selected' : ''}>Congelado</option></select>
+      <button class="b" style="padding:5px 12px">Salvar</button><button type="button" class="lnk" data-cancelar="1">cancelar</button></form>`;
+    const fm = td.querySelector('form');
+    fm.onsubmit = async e => { e.preventDefault(); try {
+      await q(sb.from('lote_pesagens').insert({ lote_id:lw.id, produto:cod, conservacao:fm.elements.conservacao.value, peso_kg:Number(fm.elements.peso_kg.value), volumes: fm.elements.volumes.value ? Number(fm.elements.volumes.value) : null }));
+      const linhas = comparativo(lw, planosDe(lw.id), pesagensDe(lw.id)), i = linhas.findIndex(x => x.codigo === cod);
+      const prox = linhas.slice(i + 1).concat(linhas.slice(0, i)).find(x => x.real == null && !x.foraDoPlano);
+      st.proxLancar = prox ? prox.codigo : null; render(); } catch (er) { falha(er); } };
+    fm.elements.peso_kg.focus();
+  }
+  if (lw && st.proxLancar) { const c = st.proxLancar; st.proxLancar = null; abrirLanc(c); }
   const fW = $('#fPeso');
   if (fW) fW.onsubmit = async e => { e.preventDefault(); try {
     await q(sb.from('lote_pesagens').insert({ lote_id:lw.id, produto:fW.elements.produto.value, conservacao:fW.elements.conservacao.value, peso_kg:Number(fW.elements.peso_kg.value),
