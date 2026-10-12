@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="google" content="notranslate">
-<title>Forte Aves · Gestão do Abatedouro</title>
+<title>Fort Aves · Gestão do Abatedouro</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <style>
   :root { --bg:#f4f5f2; --card:#fff; --ink:#1d2a22; --mut:#66736b; --line:#dfe3dc; --pri:#1f6b43; --pri2:#e6f2ea; --warn:#b4541a; --err:#b3261e; }
@@ -58,7 +58,7 @@
 </head>
 <body>
 <div id="login" class="card" hidden>
-  <h2>Forte Aves · Gestão do Abatedouro</h2>
+  <h2>Fort Aves · Gestão do Abatedouro</h2>
   <form id="fLogin">
     <label>E-mail <input type="email" id="lEmail" required autocomplete="username"></label>
     <label>Senha <input type="password" id="lSenha" required autocomplete="current-password"></label>
@@ -68,7 +68,7 @@
 </div>
 
 <header id="top" hidden>
-  <h1>FORTE AVES</h1>
+  <h1>FORT AVES</h1>
   <nav id="nav">
     <button data-tab="dia">Dia de produção</button>
     <button data-tab="mes">Fechamento mensal</button>
@@ -272,7 +272,7 @@ function relatorio(l, cd, lotes, custoLote) {
   const porCab = cd.custo_total / cd.cabecas_dia, part = l.cabecas_pagantes / cd.cabecas_dia;
   const linha = (nome, v) => `<tr><td>${nome}</td><td class="n">${brl(v)}</td><td class="n">${brl(v * part)}</td></tr>`;
   $('#rel').innerHTML = `
-    <h1>FORTE AVES · Abatedouro</h1><p>Relatório de custo operacional do lote</p>
+    <h1>FORT AVES · Abatedouro</h1><p>Relatório de custo operacional do lote</p>
     <h2>Lote ${esc(l.codigo)}</h2>
     <table><tr><td>Cooperado</td><td><b>${esc(nomeDe('cooperados', l.cooperado_id))}</b></td><td>Data do abate</td><td><b>${dataBR(l.data)}</b></td></tr>
       <tr><td>Tipo de ave</td><td>${esc((st.ref.tipos_ave.find(t => t.codigo === l.tipo_ave) || {}).nome || l.tipo_ave)}</td><td>Veículo / motorista</td><td>${esc(nomeDe('veiculos', l.veiculo_id, 'placa'))} / ${esc(nomeDe('motoristas', l.motorista_id))}</td></tr>

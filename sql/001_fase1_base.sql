@@ -1,4 +1,4 @@
--- FORTE AVES - Abatedouro | Fase 1: cadastros, recebimento, dia de produção e custo por lote
+-- FORT AVES - Abatedouro | Fase 1: cadastros, recebimento, dia de produção e custo por lote
 -- Regras (aceitas em 11/10/2026):
 --   * rateio por cabeça abatida; galeto paga o mesmo que frango grande
 --   * mortos na chegada e condenadas pelo SIE não pagam
