@@ -4,19 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="google" content="notranslate">
+<link rel="icon" href="logo.svg">
 <title>Fort Aves · Gestão do Abatedouro</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <style>
-  :root { --bg:#f4f5f2; --card:#fff; --ink:#1d2a22; --mut:#66736b; --line:#dfe3dc; --pri:#1f6b43; --pri2:#e6f2ea; --warn:#b4541a; --err:#b3261e; }
+  :root { --bg:#f4f5f2; --card:#fff; --ink:#1d2a22; --mut:#66736b; --line:#dfe3dc; --pri:#0f8a41; --pri2:#e5f4eb; --warn:#b4541a; --err:#b3261e; --red:#ec1f27; }
   * { box-sizing:border-box; }
   [hidden] { display:none !important; }
   body { margin:0; font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
-  header { background:var(--pri); color:#fff; padding:10px 20px; display:flex; align-items:center; gap:24px; flex-wrap:wrap; }
-  header h1 { font-size:17px; margin:0; letter-spacing:.3px; }
+  header { background:#fff; color:var(--ink); border-bottom:3px solid var(--pri); padding:8px 20px; display:flex; align-items:center; gap:24px; flex-wrap:wrap; }
+  header img { height:34px; display:block; }
   nav { display:flex; gap:4px; flex:1; }
-  nav button { background:transparent; color:#dcebe2; border:0; padding:8px 14px; border-radius:6px; font:inherit; cursor:pointer; }
-  nav button.on { background:#fff; color:var(--pri); font-weight:600; }
-  header .user { font-size:12px; opacity:.9; }
+  nav button { background:transparent; color:var(--ink); border:0; padding:8px 14px; border-radius:6px; font:inherit; cursor:pointer; }
+  nav button.on { background:var(--pri); color:#fff; font-weight:600; }
+  header .user { font-size:12px; color:var(--mut); }
   main { max-width:1180px; margin:0 auto; padding:18px 16px 60px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
   .card h2 { font-size:15px; margin:0 0 12px; }
@@ -58,7 +59,8 @@
 </head>
 <body>
 <div id="login" class="card" hidden>
-  <h2>Fort Aves · Gestão do Abatedouro</h2>
+  <img src="logo.svg" alt="Fort Aves" style="width:210px;display:block;margin:6px auto 4px">
+  <p class="mut" style="text-align:center;margin:0 0 14px">Gestão do Abatedouro</p>
   <form id="fLogin">
     <label>E-mail <input type="email" id="lEmail" required autocomplete="username"></label>
     <label>Senha <input type="password" id="lSenha" required autocomplete="current-password"></label>
@@ -68,13 +70,13 @@
 </div>
 
 <header id="top" hidden>
-  <h1>FORT AVES</h1>
+  <img src="logo.svg" alt="Fort Aves">
   <nav id="nav">
     <button data-tab="dia">Dia de produção</button>
     <button data-tab="mes">Fechamento mensal</button>
     <button data-tab="cad">Cadastros</button>
   </nav>
-  <span class="user"><span id="uEmail"></span> · <button class="lnk" style="color:#fff" id="bSair">sair</button></span>
+  <span class="user"><span id="uEmail"></span> · <button class="lnk" id="bSair">sair</button></span>
 </header>
 <main id="main" hidden></main>
 <div id="rel"></div>
@@ -272,7 +274,7 @@ function relatorio(l, cd, lotes, custoLote) {
   const porCab = cd.custo_total / cd.cabecas_dia, part = l.cabecas_pagantes / cd.cabecas_dia;
   const linha = (nome, v) => `<tr><td>${nome}</td><td class="n">${brl(v)}</td><td class="n">${brl(v * part)}</td></tr>`;
   $('#rel').innerHTML = `
-    <h1>FORT AVES · Abatedouro</h1><p>Relatório de custo operacional do lote</p>
+    <img src="logo.svg" alt="Fort Aves" style="height:48px"><p>Abatedouro · Relatório de custo operacional do lote</p>
     <h2>Lote ${esc(l.codigo)}</h2>
     <table><tr><td>Cooperado</td><td><b>${esc(nomeDe('cooperados', l.cooperado_id))}</b></td><td>Data do abate</td><td><b>${dataBR(l.data)}</b></td></tr>
       <tr><td>Tipo de ave</td><td>${esc((st.ref.tipos_ave.find(t => t.codigo === l.tipo_ave) || {}).nome || l.tipo_ave)}</td><td>Veículo / motorista</td><td>${esc(nomeDe('veiculos', l.veiculo_id, 'placa'))} / ${esc(nomeDe('motoristas', l.motorista_id))}</td></tr>
