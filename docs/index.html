@@ -59,6 +59,7 @@
     #rel td, #rel th { border-bottom:1px solid #bbb; padding:4px 6px; }
     #rel .tot td { font-weight:700; border-top:2px solid #000; }
     #rel .relaviso { border:2px solid #000; padding:8px 10px; margin:14px 0 0; }
+    #rel .assin { display:flex; gap:40px; margin-top:60px; } #rel .assin div { flex:1; border-top:1px solid #000; padding-top:4px; text-align:center; font-size:12px; }
     #rel .previa { border:2px dashed #000; padding:4px 10px; font-weight:700; display:inline-block; }
   }
 </style>
@@ -91,6 +92,7 @@
   <nav id="nav">
     <button data-tab="dia">Dia de produção</button>
     <button data-tab="mes">Fechamento mensal</button>
+    <button data-tab="cam">Câmara fria</button>
     <button data-tab="emb">Embalagens</button>
     <button data-tab="cad">Cadastros</button>
     <button data-tab="usu" id="nvUsu" hidden>Usuários</button>
@@ -637,6 +639,98 @@ async function telaMes() {
   };
 }
 
+// ───────── CÂMARA FRIA E EXPEDIÇÃO ─────────
+const CONS = { resfriado:'Resfriado', congelado:'Congelado' };
+function romaneio(exp, itens, lotes) {
+  const cod = id => (lotes.find(l => l.id === id) || {}).codigo || id, tk = itens.reduce((a, x) => a + Number(x.peso_kg), 0), tv = itens.reduce((a, x) => a + (x.volumes || 0), 0);
+  $('#rel').innerHTML = `
+    <img src="logo.svg" alt="Fort Aves" style="height:48px"><p>Abatedouro · Romaneio de retirada de produtos</p>
+    <h2>Retirada nº ${exp.id}</h2>
+    <table><tr><td>Cooperado</td><td><b>${esc(nomeDe('cooperados', exp.cooperado_id))}</b></td><td>Data da retirada</td><td><b>${dataBR(exp.data)}</b></td></tr>
+      <tr><td>Retirado por</td><td>${esc(exp.retirado_por) || '—'}</td><td>Documento</td><td>${esc(exp.documento) || '—'}</td></tr>
+      <tr><td>Placa do veículo</td><td>${esc(exp.placa) || '—'}</td><td>Observação</td><td style="white-space:normal">${esc(exp.observacao) || '—'}</td></tr></table>
+    <h2>Produtos retirados</h2>
+    <table><tr><th>Lote</th><th>Produto</th><th>Conservação</th><th class="n">Volumes</th><th class="n">Peso (kg)</th></tr>
+      ${itens.map(x => `<tr><td>${esc(cod(x.lote_id))}</td><td>${esc(nomeProduto(x.produto))}</td><td>${CONS[x.conservacao]}</td><td class="n">${x.volumes ? num(x.volumes) : '—'}</td><td class="n">${num(x.peso_kg, 2)}</td></tr>`).join('')}
+      <tr class="tot"><td colspan="3">Total</td><td class="n">${tv ? num(tv) : '—'}</td><td class="n">${num(tk, 2)}</td></tr></table>
+    <p style="font-size:11px">Declaro ter recebido os produtos acima, conferidos em quantidade e peso no ato da retirada.</p>
+    <div class="assin"><div>Fort Aves · responsável pela expedição</div><div>Cooperado ou portador · ${esc(exp.retirado_por) || ''}</div></div>
+    <p style="font-size:11px;margin-top:20px">Emitido em ${new Date().toLocaleString('pt-BR')}.</p>`;
+  window.print();
+}
+async function telaCam() {
+  const coops = ativos('cooperados');
+  if (!coops.length) { main.innerHTML = '<div class="card"><p>Cadastre um cooperado antes de usar a câmara fria.</p></div>'; return; }
+  if (!coops.some(c => c.id === st.camCoop)) { st.camCoop = coops[0].id; st.cart = []; }
+  const coop = st.camCoop, cart = st.cart = st.cart || [];
+  const [saldos, exps] = await Promise.all([
+    q(sb.from('v_camara_saldo').select('*').eq('cooperado_id', coop).gt('saldo_kg', 0.004).order('data_abate').order('codigo')),
+    q(sb.from('expedicoes').select('*').eq('cooperado_id', coop).order('id', { ascending:false }).limit(20))]);
+  const itens = exps.length ? await q(sb.from('expedicao_itens').select('*').in('expedicao_id', exps.map(e => e.id)).order('id')) : [];
+  const lotesIds = [...new Set(itens.map(i => i.lote_id))];
+  const lotesExp = lotesIds.length ? await q(sb.from('lotes').select('id,codigo').in('id', lotesIds)) : [];
+  const chave = x => `${x.lote_id}|${x.produto}|${x.conservacao}`, noCart = x => cart.find(c => chave(c) === chave(x));
+  const dias = d => Math.max(0, Math.round((new Date(hoje()) - new Date(d)) / 864e5));
+  const totK = saldos.reduce((a, x) => a + Number(x.saldo_kg), 0), totV = saldos.reduce((a, x) => a + Number(x.saldo_vol), 0);
+  const cartK = cart.reduce((a, x) => a + x.peso_kg, 0), cartV = cart.reduce((a, x) => a + (x.volumes || 0), 0);
+  main.innerHTML = `<div class="card row"><label>Cooperado <select id="cCoop">${coops.map(c => `<option value="${c.id}" ${c.id === coop ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}</select></label></div>
+  <div class="card"><h2>Saldo na câmara fria · ${esc(nomeDe('cooperados', coop))}</h2>
+    <p class="mut">Entra na câmara tudo o que é pesado na saída da produção. Para registrar uma retirada, clique em "Retirar" nas linhas (ou em "Retirar tudo"), confira a retirada montada abaixo e registre.</p>
+    <div class="kpis" style="margin-bottom:12px"><div class="kpi"><small>Produtos em câmara</small><b>${num(totK, 1)} kg</b></div><div class="kpi"><small>Volumes em câmara</small><b>${num(totV)}</b></div>
+      <div class="kpi"><small>Lotes com saldo</small><b>${new Set(saldos.map(x => x.lote_id)).size}</b></div></div>
+    <div class="scroll"><table><tr><th>Lote</th><th>Abate</th><th class="n">Dias em câmara</th><th>Produto</th><th>Conservação</th><th class="n">Entrada (kg)</th><th class="n">Retirado (kg)</th><th class="n">Saldo (kg)</th><th class="n">Saldo (vol.)</th><th></th></tr>
+    ${saldos.map(x => { const c = noCart(x); return `<tr><td>${esc(x.codigo)}</td><td>${dataBR(x.data_abate)}</td><td class="n">${dias(x.data_abate)}</td><td>${esc(nomeProduto(x.produto))}</td><td><span class="tag ${x.conservacao === 'congelado' ? 'az' : 'ok'}">${CONS[x.conservacao]}</span></td>
+      <td class="n">${num(x.kg_entrada, 1)}</td><td class="n">${num(x.kg_retirado, 1)}</td><td class="n"><b>${num(x.saldo_kg, 1)}</b></td><td class="n">${num(x.saldo_vol)}</td>
+      <td class="n ret" data-k="${chave(x)}">${c ? `<span class="tag az">na retirada: ${num(c.peso_kg, 1)} kg</span> <button class="lnk" data-tirar="${chave(x)}">tirar</button>` : `<button class="b sec" style="padding:4px 10px" data-ret="${chave(x)}">Retirar</button>`}</td></tr>`; }).join('') || '<tr><td colspan="10" class="mut">Nenhum produto deste cooperado na câmara fria.</td></tr>'}
+    </table></div>
+    ${saldos.length ? '<p style="margin:12px 0 0"><button class="b sec" id="bTudo">Retirar tudo</button></p>' : ''}</div>
+  ${!cart.length ? '' : `<div class="card" id="cRet"><h2>Retirada em montagem</h2>
+    <div class="scroll"><table><tr><th>Lote</th><th>Produto</th><th>Conservação</th><th class="n">Volumes</th><th class="n">Peso (kg)</th><th></th></tr>
+    ${cart.map(x => `<tr><td>${esc(x.codigo)}</td><td>${esc(nomeProduto(x.produto))}</td><td>${CONS[x.conservacao]}</td><td class="n">${x.volumes ? num(x.volumes) : '—'}</td><td class="n">${num(x.peso_kg, 2)}</td><td><button class="lnk" data-tirar="${chave(x)}">tirar</button></td></tr>`).join('')}
+    <tr><td colspan="3"><b>Total</b></td><td class="n"><b>${cartV ? num(cartV) : '—'}</b></td><td class="n"><b>${num(cartK, 2)}</b></td><td></td></tr></table></div>
+    <form id="fRet" style="margin-top:12px"><div class="grid">
+      <label>Data da retirada <input name="data" type="date" value="${hoje()}" required></label>
+      <label>Retirado por <input name="retirado_por" required placeholder="nome de quem veio buscar"></label>
+      <label>Documento <input name="documento"></label>
+      <label>Placa do veículo <input name="placa"></label>
+      <label>Observação <input name="observacao"></label></div>
+      <p><button class="b">Registrar retirada e imprimir romaneio</button> <button type="button" class="b sec" id="bLimparRet">Descartar</button></p></form></div>`}
+  <div class="card"><h2>Retiradas recentes</h2><div class="scroll"><table>
+    <tr><th>Nº</th><th>Data</th><th>Retirado por</th><th>Placa</th><th class="n">Itens</th><th class="n">Volumes</th><th class="n">Peso (kg)</th><th></th></tr>
+    ${exps.map(e => { const it = itens.filter(i => i.expedicao_id === e.id); return `<tr><td>${e.id}</td><td>${dataBR(e.data)}</td><td>${esc(e.retirado_por)}</td><td>${esc(e.placa)}</td><td class="n">${it.length}</td>
+      <td class="n">${num(it.reduce((a, x) => a + (x.volumes || 0), 0))}</td><td class="n">${num(it.reduce((a, x) => a + Number(x.peso_kg), 0), 2)}</td>
+      <td><button class="lnk" data-rom="${e.id}">romaneio</button><button class="lnk" data-delexp="${e.id}">excluir</button></td></tr>`; }).join('') || '<tr><td colspan="8" class="mut">Nenhuma retirada registrada.</td></tr>'}
+    </table></div></div>`;
+  $('#cCoop').onchange = e => { st.camCoop = Number(e.target.value); st.cart = []; render(); };
+  const linha = k => saldos.find(x => chave(x) === k);
+  const fR = $('#fRet');
+  if (fR) fR.onsubmit = async e => { e.preventDefault(); try {
+    const exp = { cooperado_id:coop, data:fR.elements.data.value, retirado_por:fR.elements.retirado_por.value, documento:fR.elements.documento.value, placa:fR.elements.placa.value.toUpperCase(), observacao:fR.elements.observacao.value };
+    const its = cart.map(x => ({ lote_id:x.lote_id, produto:x.produto, conservacao:x.conservacao, peso_kg:x.peso_kg, volumes:x.volumes || '' }));
+    const id = await q(sb.rpc('registrar_retirada', { p_cooperado:coop, p_data:exp.data, p_retirado_por:exp.retirado_por, p_documento:exp.documento, p_placa:exp.placa, p_observacao:exp.observacao, p_itens:its }));
+    const lotesCart = cart.map(x => ({ id:x.lote_id, codigo:x.codigo })); st.cart = [];
+    await render(); romaneio({ ...exp, id }, its.map(x => ({ ...x, volumes:x.volumes || null })), lotesCart); } catch (er) { falha(er); } };
+  main.onclick = async e => { const t = e.target;
+    try {
+      if (t.dataset.ret) { const x = linha(t.dataset.ret), td = t.parentElement;
+        td.innerHTML = `<form class="row" style="gap:6px;justify-content:flex-end;flex-wrap:nowrap;align-items:center">
+          <input name="peso_kg" type="number" step="0.01" min="0.01" max="${x.saldo_kg}" required value="${x.saldo_kg}" style="width:96px;text-align:right" title="kg">
+          <input name="volumes" type="number" step="1" min="1" value="${x.saldo_vol > 0 ? x.saldo_vol : ''}" placeholder="volumes" style="width:86px;text-align:right" title="volumes">
+          <button class="b" style="padding:5px 12px">Incluir</button><button type="button" class="lnk" data-cancelar="1">cancelar</button></form>`;
+        const fm = td.querySelector('form');
+        fm.onsubmit = ev => { ev.preventDefault(); const kg = Number(fm.elements.peso_kg.value);
+          if (kg > Number(x.saldo_kg) + 0.005) return alert('A retirada não pode ser maior que o saldo na câmara.');
+          cart.push({ lote_id:x.lote_id, codigo:x.codigo, produto:x.produto, conservacao:x.conservacao, peso_kg:kg, volumes: fm.elements.volumes.value ? Number(fm.elements.volumes.value) : null }); render(); };
+        fm.elements.peso_kg.select(); }
+      if (t.dataset.cancelar) render();
+      if (t.dataset.tirar) { st.cart = cart.filter(c => chave(c) !== t.dataset.tirar); render(); }
+      if (t.id === 'bTudo') { st.cart = saldos.map(x => ({ lote_id:x.lote_id, codigo:x.codigo, produto:x.produto, conservacao:x.conservacao, peso_kg:Number(x.saldo_kg), volumes: x.saldo_vol > 0 ? Number(x.saldo_vol) : null })); await render(); const c = $('#cRet'); if (c) c.scrollIntoView({ behavior:'smooth' }); }
+      if (t.id === 'bLimparRet') { st.cart = []; render(); }
+      if (t.dataset.rom) { const ex = exps.find(x => x.id === Number(t.dataset.rom)); romaneio(ex, itens.filter(i => i.expedicao_id === ex.id), lotesExp); }
+      if (t.dataset.delexp) { if (!confirm(`Excluir a retirada nº ${t.dataset.delexp}? Os produtos voltam para o saldo da câmara fria.`)) return; await q(sb.from('expedicoes').delete().eq('id', t.dataset.delexp)); render(); }
+    } catch (er) { falha(er); } };
+}
+
 // ───────── EMBALAGENS (estoque por cooperado) ─────────
 async function telaEmb() {
   const coops = ativos('cooperados');
@@ -777,7 +871,7 @@ async function telaUsuarios() {
 async function render() {
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === st.tab));
   main.onclick = null; main.onchange = null;
-  try { await ({ dia:telaDia, mes:telaMes, emb:telaEmb, cad:telaCad, usu:telaUsuarios })[st.tab](); }
+  try { await ({ dia:telaDia, mes:telaMes, cam:telaCam, emb:telaEmb, cad:telaCad, usu:telaUsuarios })[st.tab](); }
   catch (e) { main.innerHTML = `<div class="card"><p class="msg">Erro ao carregar: ${esc(e.message)}</p></div>`; }
 }
 $('#nav').onclick = e => { if (e.target.dataset.tab) { st.tab = e.target.dataset.tab; render(); } };
