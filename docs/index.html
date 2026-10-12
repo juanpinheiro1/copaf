@@ -43,6 +43,7 @@
   .kpi.big { background:var(--pri); color:#fff; } .kpi.big small { color:#cfe5d8; }
   .tag { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px; background:#fdecdc; color:var(--warn); }
   .tag.ok { background:var(--pri2); color:var(--pri); }
+  .aviso { background:#fff6e9; border-color:#f0c48a; color:#7a3d0c; }
   .msg { color:var(--err); margin:8px 0 0; min-height:1em; }
   .mut { color:var(--mut); }
   #login { max-width:340px; margin:12vh auto; }
@@ -54,6 +55,7 @@
     #rel h1 { font-size:18px; margin:0; } #rel h2 { font-size:13px; margin:18px 0 6px; border-bottom:1px solid #000; padding-bottom:3px; }
     #rel td, #rel th { border-bottom:1px solid #bbb; padding:4px 6px; }
     #rel .tot td { font-weight:700; border-top:2px solid #000; }
+    #rel .relaviso { border:2px solid #000; padding:8px 10px; margin:14px 0 0; }
   }
 </style>
 </head>
@@ -183,16 +185,17 @@ async function telaDia() {
     $('#bAbrir').onclick = abrirDia;
     return;
   }
-  const fx = dia.fechado, porCab = cd.cabecas_dia ? cd.custo_total / cd.cabecas_dia : null;
+  const fx = dia.fechado, porCab = cd.cabecas_dia ? cd.custo_total / cd.cabecas_dia : null, semMensal = !Number(cd.parcela_custos_mensais);
   const custoLote = id => (cl.find(x => x.lote_id === id) || {}).custo_lote;
   main.innerHTML = topo + `
+  ${semMensal ? `<div class="card aviso">Os custos fixos mensais de ${d.slice(5, 7)}/${d.slice(0, 4)} ainda não foram informados. O custo abaixo traz <b>somente os custos do dia</b> (diaristas, energia, água, limpeza e outros). <button class="lnk" id="bIrMes">Informar custos fixos do mês</button></div>` : ''}
   <div class="card"><h2>Custo do dia</h2><div class="kpis">
     <div class="kpi"><small>Diaristas</small><b>${brl(cd.custo_diaristas)}</b></div>
     <div class="kpi"><small>Energia</small><b>${brl(cd.custo_energia)}</b></div>
     <div class="kpi"><small>Água</small><b>${brl(cd.custo_agua)}</b></div>
     <div class="kpi"><small>Limpeza</small><b>${brl(cd.custo_limpeza)}</b></div>
     <div class="kpi"><small>Outros</small><b>${brl(cd.custo_outros)}</b></div>
-    <div class="kpi"><small>Diária dos custos mensais</small><b>${brl(cd.parcela_custos_mensais)}</b></div>
+    <div class="kpi"><small>Diária dos custos fixos mensais</small><b>${semMensal ? 'não informada' : brl(cd.parcela_custos_mensais)}</b></div>
     <div class="kpi"><small>Cabeças pagantes</small><b>${num(cd.cabecas_dia)}</b></div>
     <div class="kpi big"><small>Custo total do dia</small><b>${brl(cd.custo_total)}</b></div>
     <div class="kpi big"><small>Custo por cabeça</small><b>${porCab == null ? '—' : num(porCab, 4)}</b></div>
@@ -265,6 +268,7 @@ async function telaDia() {
     if (t.dataset.edit) { const l = lotes.find(x => x.id === Number(t.dataset.edit)); editando = l.id;
       $('#tLote').textContent = 'Editando lote ' + l.codigo; fL.querySelector('.grid').innerHTML = campos(F_LOTE, l); $('#bLimpar').hidden = false; fL.scrollIntoView({ behavior:'smooth' }); }
     if (t.id === 'bLimpar') render();
+    if (t.id === 'bIrMes') { st.mes = d.slice(0, 7); st.tab = 'mes'; render(); }
     if (t.dataset.rel) relatorio(lotes.find(x => x.id === Number(t.dataset.rel)), cd, lotes, custoLote);
   };
 }
@@ -272,8 +276,7 @@ async function telaDia() {
 async function abrirDia() {
   try {
     const comp = st.data.slice(0, 7) + '-01';
-    const c = await q(sb.from('competencias').select('competencia').eq('competencia', comp).maybeSingle());
-    if (!c) { alert('Antes de abrir o dia, cadastre o mês em "Fechamento mensal" (dias de abate previstos e custos mensais).'); st.tab = 'mes'; st.mes = comp.slice(0, 7); return render(); }
+    await q(sb.from('competencias').upsert({ competencia:comp }, { onConflict:'competencia', ignoreDuplicates:true }));
     const ant = await q(sb.from('dias_producao').select('*').lt('data', st.data).order('data', { ascending:false }).limit(1));
     const a = ant[0] || {};
     await q(sb.from('dias_producao').insert({ data:st.data, tarifa_energia:a.tarifa_energia ?? null, tarifa_agua:a.tarifa_agua ?? null }));
@@ -283,7 +286,7 @@ async function abrirDia() {
 
 // ───────── RELATÓRIO DO LOTE (impressão / PDF) ─────────
 function relatorio(l, cd, lotes, custoLote) {
-  const porCab = cd.custo_total / cd.cabecas_dia, part = l.cabecas_pagantes / cd.cabecas_dia;
+  const porCab = cd.custo_total / cd.cabecas_dia, part = l.cabecas_pagantes / cd.cabecas_dia, semMensal = !Number(cd.parcela_custos_mensais);
   const linha = (nome, v) => `<tr><td>${nome}</td><td class="n">${brl(v)}</td><td class="n">${brl(v * part)}</td></tr>`;
   $('#rel').innerHTML = `
     <img src="logo.svg" alt="Fort Aves" style="height:48px"><p>Abatedouro · Relatório de custo operacional do lote</p>
@@ -298,9 +301,10 @@ function relatorio(l, cd, lotes, custoLote) {
     <p>Cabeças abatidas no dia: ${num(cd.cabecas_dia)} em ${lotes.length} lote(s). Participação deste lote: ${num(part * 100, 2)}%.</p>
     <table><tr><th>Item</th><th class="n">Custo do dia</th><th class="n">Parcela do lote</th></tr>
       ${linha('Mão de obra (diaristas)', cd.custo_diaristas)}${linha('Energia elétrica', cd.custo_energia)}${linha('Água', cd.custo_agua)}
-      ${linha('Limpeza', cd.custo_limpeza)}${linha('Outros custos do dia', cd.custo_outros)}${linha('Custos mensais (equipe fixa, manutenção, materiais)', cd.parcela_custos_mensais)}
+      ${linha('Limpeza', cd.custo_limpeza)}${linha('Outros custos do dia', cd.custo_outros)}${semMensal ? '<tr><td>Custos fixos mensais (equipe fixa, manutenção, materiais)</td><td class="n" colspan="2">não incluídos</td></tr>' : linha('Custos fixos mensais (equipe fixa, manutenção, materiais)', cd.parcela_custos_mensais)}
       <tr class="tot"><td>Total</td><td class="n">${brl(cd.custo_total)}</td><td class="n">${brl(custoLote(l.id))}</td></tr></table>
-    <h2>Valor a pagar</h2>
+    ${semMensal ? '<p class="relaviso"><b>Atenção:</b> este custo não inclui os componentes de despesas fixas mensais do abatedouro (equipe fixa, manutenção e materiais de limpeza), que ainda não foram apurados para o mês. O valor abaixo corresponde somente aos custos do dia do abate.</p>' : ''}
+    <h2>${semMensal ? 'Valor parcial (custos do dia)' : 'Valor a pagar'}</h2>
     <p>${num(l.cabecas_pagantes)} cabeças × R$ ${num(porCab, 4)} por cabeça = <b>${brl(custoLote(l.id))}</b></p>
     <p style="font-size:11px">Energia e água são apuradas no dia pela leitura dos medidores e pela tarifa da última conta. A diferença para a conta real do mês é rateada por cabeça abatida no fechamento mensal e informada em relatório complementar.</p>
     <p style="font-size:11px">Emitido em ${new Date().toLocaleString('pt-BR')}.</p>`;
@@ -308,39 +312,43 @@ function relatorio(l, cd, lotes, custoLote) {
 }
 
 // ───────── FECHAMENTO MENSAL ─────────
+const F_MES_DIAS = [{ k:'dias_abate_previstos', label:'Dias de abate previstos no mês', type:'number', step:1, req:true }];
 const F_MES = [
-  { k:'dias_abate_previstos', label:'Dias de abate previstos', type:'number', step:1, req:true },
   { k:'energia_conta_kwh', label:'Conta de energia (kWh)', type:'number' }, { k:'energia_conta_valor', label:'Conta de energia (R$)', type:'number' },
   { k:'agua_conta_m3', label:'Conta de água (m³)', type:'number' }, { k:'agua_conta_valor', label:'Conta de água (R$)', type:'number' }];
 const CAT = { salarios_fixos:'Salários da equipe fixa', manutencao:'Manutenção', produtos_limpeza:'Produtos de limpeza', ajuste_mes_anterior:'Ajuste do mês anterior', outros:'Outros' };
 
 async function telaMes() {
   const comp = st.mes + '-01';
+  await q(sb.from('competencias').upsert({ competencia:comp }, { onConflict:'competencia', ignoreDuplicates:true }));
   const [c, cm, vm, vc, dias] = await Promise.all([
-    q(sb.from('competencias').select('*').eq('competencia', comp).maybeSingle()),
+    q(sb.from('competencias').select('*').eq('competencia', comp).single()),
     q(sb.from('custos_mensais').select('*').eq('competencia', comp).order('id')),
     q(sb.from('v_complemento_mes').select('*').eq('competencia', comp).maybeSingle()),
     q(sb.from('v_complemento_cooperado').select('*').eq('competencia', comp)),
     q(sb.from('v_custo_dia').select('data,cabecas_dia,custo_total,custo_energia,custo_agua').eq('competencia', comp).order('data'))]);
   const prev = cm.reduce((s, x) => s + Number(x.valor_previsto), 0), real = cm.reduce((s, x) => s + Number(x.valor_real ?? 0), 0);
-  main.innerHTML = `<div class="card row"><label>Mês <input type="month" id="mMes" value="${st.mes}"></label>
-    ${c ? '' : '<span class="tag">Mês ainda não cadastrado</span>'}</div>
-  <div class="card"><h2>Parâmetros e contas reais do mês</h2><form id="fMes"><div class="grid">${campos(F_MES, c || {})}</div>
-    <p><button class="b">${c ? 'Salvar' : 'Cadastrar mês'}</button></p></form></div>
-  ${!c ? '' : `
-  <div class="card"><h2>Custos mensais</h2>
+  const diaria = c.dias_abate_previstos && prev ? prev / c.dias_abate_previstos : null;
+  main.innerHTML = `<div class="card row"><label>Mês <input type="month" id="mMes" value="${st.mes}"></label></div>
+  <div class="card"><h2>Custos fixos mensais para rateio</h2>
+    <p class="mut">Informe os custos fixos previstos do mês (equipe fixa com encargos, manutenção, produtos de limpeza e outros) e em quantos dias haverá abate. A soma é dividida pelos dias previstos, e essa diária entra no custo de cada dia de produção.</p>
+    ${diaria == null ? '<p class="card aviso" style="margin:0 0 12px">Enquanto faltarem os dias de abate previstos ou os custos fixos, os dias deste mês são apurados só com os custos do dia, e o relatório do lote sai com esse aviso.</p>' : ''}
     <div class="kpis" style="margin-bottom:12px"><div class="kpi"><small>Total previsto</small><b>${brl(prev)}</b></div>
-      <div class="kpi"><small>Diária cobrada por dia de abate</small><b>${brl(prev / c.dias_abate_previstos)}</b></div>
-      <div class="kpi"><small>Dias de abate realizados</small><b>${dias.length} de ${c.dias_abate_previstos}</b></div>
+      <div class="kpi big"><small>Diária cobrada por dia de abate</small><b>${diaria == null ? '—' : brl(diaria)}</b></div>
+      <div class="kpi"><small>Dias de abate realizados</small><b>${dias.length}${c.dias_abate_previstos ? ' de ' + c.dias_abate_previstos : ''}</b></div>
       <div class="kpi"><small>Total real lançado</small><b>${brl(real)}</b></div></div>
+    <form id="fDias" class="row" style="margin-bottom:14px">${campos(F_MES_DIAS, c)}<button class="b">Salvar</button></form>
     <div class="scroll"><table><tr><th>Categoria</th><th>Descrição</th><th class="n">Previsto</th><th class="n">Real</th><th></th></tr>
     ${cm.map(x => `<tr><td>${CAT[x.categoria]}</td><td>${esc(x.descricao)}</td><td class="n">${brl(x.valor_previsto)}</td><td class="n">${brl(x.valor_real)}</td>
-      <td><button class="lnk" data-real="${x.id}">lançar real</button><button class="lnk" data-del="${x.id}">excluir</button></td></tr>`).join('') || '<tr><td colspan="5" class="mut">Nenhum custo mensal cadastrado.</td></tr>'}</table></div>
+      <td><button class="lnk" data-real="${x.id}">lançar real</button><button class="lnk" data-del="${x.id}">excluir</button></td></tr>`).join('') || '<tr><td colspan="5" class="mut">Nenhum custo fixo lançado neste mês.</td></tr>'}</table></div>
     <form id="fCM" class="row" style="margin-top:10px">
       <label>Categoria <select name="categoria">${Object.entries(CAT).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
       <label>Descrição <input name="descricao"></label>
       <label>Valor previsto (R$) <input name="valor_previsto" type="number" step="0.01" required></label>
-      <button class="b sec">Adicionar</button></form></div>
+      <button class="b sec">Adicionar custo</button></form></div>
+  <div class="card"><h2>Contas reais de energia e água (fim do mês)</h2>
+    <p class="mut">Lance quando as contas chegarem. A diferença para o que já foi cobrado nos dias de abate vira o complemento mensal abaixo.</p>
+    <form id="fMes"><div class="grid">${campos(F_MES, c)}</div><p><button class="b">Salvar contas</button></p></form></div>
   <div class="card"><h2>Complemento mensal de energia e água</h2>
     <p class="mut">Conta real menos o que já foi cobrado nos dias de abate, rateado por cabeça abatida no mês.</p>
     <div class="kpis" style="margin-bottom:12px">
@@ -353,10 +361,10 @@ async function telaMes() {
     ${vc.map(x => `<tr><td>${esc(nomeDe('cooperados', x.cooperado_id))}</td><td class="n">${num(x.cabecas)}</td><td class="n"><b>${brl(x.complemento)}</b></td></tr>`).join('') || '<tr><td colspan="3" class="mut">Sem lotes no mês.</td></tr>'}</table></div></div>
   <div class="card"><h2>Dias de abate do mês</h2><div class="scroll"><table><tr><th>Data</th><th class="n">Cabeças</th><th class="n">Custo do dia</th><th class="n">Por cabeça</th><th></th></tr>
     ${dias.map(x => `<tr><td>${dataBR(x.data)}</td><td class="n">${num(x.cabecas_dia)}</td><td class="n">${brl(x.custo_total)}</td><td class="n">${x.cabecas_dia ? num(x.custo_total / x.cabecas_dia, 4) : '—'}</td>
-      <td><button class="lnk" data-dia="${x.data}">abrir</button></td></tr>`).join('') || '<tr><td colspan="5" class="mut">Nenhum dia de produção no mês.</td></tr>'}</table></div></div>`}`;
+      <td><button class="lnk" data-dia="${x.data}">abrir</button></td></tr>`).join('') || '<tr><td colspan="5" class="mut">Nenhum dia de produção no mês.</td></tr>'}</table></div></div>`;
   $('#mMes').onchange = e => { st.mes = e.target.value; render(); };
-  $('#fMes').onsubmit = async e => { e.preventDefault(); try { await q(sb.from('competencias').upsert({ competencia:comp, ...ler(e.target, F_MES) })); render(); } catch (er) { falha(er); } };
-  if (!c) { main.onclick = null; return; }
+  $('#fMes').onsubmit = async e => { e.preventDefault(); try { await q(sb.from('competencias').update(ler(e.target, F_MES)).eq('competencia', comp)); render(); } catch (er) { falha(er); } };
+  $('#fDias').onsubmit = async e => { e.preventDefault(); try { await q(sb.from('competencias').update(ler(e.target, F_MES_DIAS)).eq('competencia', comp)); render(); } catch (er) { falha(er); } };
   const fCM = $('#fCM');
   fCM.onsubmit = async e => { e.preventDefault(); try {
     await q(sb.from('custos_mensais').insert({ competencia:comp, categoria:fCM.elements.categoria.value, descricao:fCM.elements.descricao.value || null, valor_previsto:Number(fCM.elements.valor_previsto.value) })); render(); } catch (er) { falha(er); } };
