@@ -55,6 +55,10 @@
   @media print {
     header, main { display:none !important; }
     #rel { display:block; padding:0 8mm; color:#000; }
+    #rel.etqs { padding:0; }
+    #rel .cab { font-size:11px; line-height:1.4; } #rel .cab b { font-size:12px; }
+    #rel .gov { text-align:center; font-size:10px; line-height:1.35; } #rel h3 { text-align:center; font-size:13px; margin:14px 0 8px; }
+    #rel table.gr td, #rel table.gr th { border:1px solid #000; padding:3px 5px; font-size:11px; white-space:normal; } #rel table.gr th { background:#d9e6c3; }
     #rel h1 { font-size:18px; margin:0; } #rel h2 { font-size:13px; margin:18px 0 6px; border-bottom:1px solid #000; padding-bottom:3px; }
     #rel td, #rel th { border-bottom:1px solid #bbb; padding:4px 6px; }
     #rel .tot td { font-weight:700; border-top:2px solid #000; }
@@ -62,7 +66,22 @@
     #rel .assin { display:flex; gap:40px; margin-top:60px; } #rel .assin div { flex:1; border-top:1px solid #000; padding-top:4px; text-align:center; font-size:12px; }
     #rel .previa { border:2px dashed #000; padding:4px 10px; font-weight:700; display:inline-block; }
   }
+  .etq { width:105mm; height:75mm; box-sizing:border-box; padding:3mm 4mm 2mm; font-family:Arial,Helvetica,sans-serif; color:#000; background:#fff; display:flex; flex-direction:column; overflow:hidden; page-break-after:always; break-after:page; }
+  .etq .nm { text-align:center; font-weight:700; font-size:13pt; letter-spacing:.4px; line-height:1.1; }
+  .etq .mid { flex:1; display:flex; gap:3mm; margin-top:1.5mm; min-height:0; }
+  .etq .esq { width:54mm; }
+  .etq table.nut { width:100%; border-collapse:collapse; font-size:5.6pt; line-height:1.12; }
+  .etq table.nut td, .etq table.nut th { border:.25mm solid #000; padding:.25mm .8mm; white-space:nowrap; text-align:left; color:#000; font-weight:400; }
+  .etq table.nut th.t { text-align:center; font-weight:700; font-size:7.6pt; border-bottom:0; padding-bottom:0; }
+  .etq table.nut td.sub { text-align:center; font-weight:700; border-top:0; border-bottom:0; padding:0 .8mm; }
+  .etq table.nut td.c { text-align:center; }
+  .etq .rod { font-size:4.4pt; margin-top:.5mm; }
+  .etq .dir { flex:1; display:flex; flex-direction:column; justify-content:center; font-size:9.5pt; line-height:1.35; min-width:0; }
+  .etq .dir svg { width:100%; height:auto; margin-top:1.5mm; }
+  .etq .pl { text-align:center; font-weight:700; font-size:11pt; letter-spacing:.3px; }
+  .previa-etq { display:inline-block; border:1px dashed var(--mut); border-radius:4px; }
 </style>
+<style id="pgStyle"></style>
 </head>
 <body>
 <div id="login" class="card" hidden>
@@ -93,6 +112,7 @@
     <button data-tab="dia">Dia de produção</button>
     <button data-tab="mes">Fechamento mensal</button>
     <button data-tab="cam">Câmara fria</button>
+    <button data-tab="sie">Relatórios SIE</button>
     <button data-tab="emb">Embalagens</button>
     <button data-tab="cad">Cadastros</button>
     <button data-tab="usu" id="nvUsu" hidden>Usuários</button>
@@ -115,6 +135,10 @@ const st = { perfil:null, tab:'dia', data:hoje(), mes:hoje().slice(0, 7), cad:'c
 
 async function q(p) { const { data, error } = await p; if (error) throw new Error(error.message); return data; }
 function falha(e) { alert('Erro: ' + e.message); }
+
+// ───────── impressão ─────────
+// pg: regra @page (vazio = A4 retrato); classe: classe aplicada à área de impressão
+function imprimir(pg = '', classe = '') { $('#pgStyle').textContent = pg; $('#rel').className = classe; window.print(); }
 
 // ───────── formulários genéricos ─────────
 function campos(fields, v = {}, dis = false) {
@@ -144,12 +168,13 @@ function ler(form, fields) {
 
 // ───────── referências ─────────
 async function carregarRef() {
-  const [co, mo, ve, fu, ta, pr, re] = await Promise.all([
+  const [co, mo, ve, fu, ta, pr, re, es, et, ee] = await Promise.all([
     q(sb.from('cooperados').select('*').order('nome')), q(sb.from('motoristas').select('*').order('nome')),
     q(sb.from('veiculos').select('*').order('placa')), q(sb.from('funcionarios').select('*').order('nome')),
     q(sb.from('tipos_ave').select('*').order('codigo')),
-    q(sb.from('produtos').select('*').order('ordem')), q(sb.from('rendimentos').select('*'))]);
-  st.ref = { cooperados:co, motoristas:mo, veiculos:ve, funcionarios:fu, tipos_ave:ta, produtos:pr, rendimentos:re };
+    q(sb.from('produtos').select('*').order('ordem')), q(sb.from('rendimentos').select('*')),
+    q(sb.from('estabelecimento').select('*').eq('id', 1).maybeSingle()), q(sb.from('etiquetas').select('*')), q(sb.from('etiqueta_eans').select('*'))]);
+  st.ref = { cooperados:co, motoristas:mo, veiculos:ve, funcionarios:fu, tipos_ave:ta, produtos:pr, rendimentos:re, estab:es || {}, etiquetas:et, eans:ee };
 }
 const nomeDe = (lista, id, campo = 'nome') => (st.ref[lista].find(x => x.id === id) || {})[campo] || '—';
 const ativos = l => st.ref[l].filter(x => x.ativo !== false);
@@ -195,6 +220,43 @@ function tabelaPrevisao(l, planos) {
     <tr class="tot"><td><b>Total previsto</b></td><td></td><td class="n"><b>${num(total, 1)}</b></td></tr></table>`;
 }
 
+// ───────── ETIQUETAS ─────────
+const NUT = [['energia', 'Valor Energético (kcal)'], ['carboidratos', 'Carboidratos (g)'], ['acucares_totais', 'Açúcares totais (g)'], ['acucares_adicionados', 'Açúcares adicionados (g)'],
+  ['proteinas', 'Proteínas (g)'], ['gorduras_totais', 'Gorduras Totais (g)'], ['gorduras_saturadas', 'Gorduras saturadas (g)'], ['gorduras_trans', 'Gorduras trans (g)'], ['fibras', 'Fibras alimentares (g)'], ['sodio', 'Sódio (mg)']];
+// valores diários de referência (IN 75/2020); açúcares totais não têm VD
+const VDR = { energia:2000, carboidratos:300, acucares_adicionados:50, proteinas:50, gorduras_totais:65, gorduras_saturadas:20, gorduras_trans:2, fibras:25, sodio:2000 };
+const nd = v => v == null || v === '' ? '' : Number(v).toLocaleString('pt-BR', { maximumFractionDigits:2 });
+const eanValido = e => /^\d{13}$/.test(e) && (10 - [...e.slice(0, 12)].reduce((a, c, i) => a + Number(c) * (i % 2 ? 3 : 1), 0) % 10) % 10 === Number(e[12]);
+function ean13Svg(e) {
+  if (!eanValido(e)) return '';
+  const L = ['0001101', '0011001', '0010011', '0111101', '0100011', '0110001', '0101111', '0111011', '0110111', '0001011'],
+        G = ['0100111', '0110011', '0011011', '0100001', '0011101', '0111001', '0000101', '0010001', '0001001', '0010111'],
+        R = ['1110010', '1100110', '1101100', '1000010', '1011100', '1001110', '1010000', '1000100', '1001000', '1110100'],
+        P = ['LLLLLL', 'LLGLGG', 'LLGGLG', 'LLGGGL', 'LGLLGG', 'LGGLLG', 'LGGGLL', 'LGLGLG', 'LGLGGL', 'LGGLGL'][Number(e[0])];
+  let bits = '101'; for (let i = 0; i < 6; i++) bits += (P[i] === 'L' ? L : G)[Number(e[i + 1])];
+  bits += '01010'; for (let i = 0; i < 6; i++) bits += R[Number(e[i + 7])]; bits += '101';
+  const guarda = i => i < 3 || (i >= 45 && i < 50) || i >= 92; let r = '';
+  for (let i = 0; i < 95; i++) if (bits[i] === '1') r += `<rect x="${11 + i}" y="0" width="1.02" height="${guarda(i) ? 62 : 56}"/>`;
+  const txt = (x, t) => `<text x="${x}" y="66" font-size="9" font-family="Arial,Helvetica,sans-serif" text-anchor="middle">${t}</text>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 117 68" shape-rendering="crispEdges" fill="#000">${r}${txt(5, e[0])}${txt(35, e.slice(1, 7).split('').join(' '))}${txt(82, e.slice(7).split('').join(' '))}</svg>`;
+}
+const eanDe = (produto, cooperado) => (st.ref.eans.find(x => x.produto === produto && x.cooperado_id === cooperado) || {}).ean || (st.ref.etiquetas.find(x => x.produto === produto) || {}).ean || '';
+// d: { modelo (linha de etiquetas), lote, fab, val, ean }
+function etiquetaHtml(d) {
+  const m = d.modelo, n = m.nutrientes || {}, porc = m.porcao_g ? Number(m.porcao_g) : null;
+  return `<div class="etq"><div class="nm">( ${esc(m.nome_impresso)} )</div>
+    <div class="mid"><div class="esq"><table class="nut">
+      <tr><th class="t" colspan="4">INFORMAÇÃO NUTRICIONAL</th></tr>
+      <tr><td class="sub" colspan="4">${m.porcoes_emb ? 'Porções por emb. ' + esc(m.porcoes_emb) : '&nbsp;'}</td></tr>
+      <tr><td class="sub" colspan="4" style="border-bottom:.25mm solid #000">Porção: ${porc ? nd(porc) + ' g' : ''}${m.porcao_desc ? ' ( ' + esc(m.porcao_desc) + ' )' : ''}</td></tr>
+      <tr><td>Quantidade por porção</td><td class="c">100 g</td><td class="c">${porc ? nd(porc) + ' g' : ''}</td><td class="c">%VD(*)</td></tr>
+      ${NUT.map(([k, r]) => { const x = n[k] || {}; return `<tr><td>${r}</td><td class="c">${nd(x.v100)}</td><td class="c">${x.v100 == null || x.v100 === '' || !porc ? '' : nd(Number(x.v100) * porc / 100)}</td><td class="c">${x.vd == null || x.vd === '' ? '' : nd(x.vd) + ' %'}</td></tr>`; }).join('')}
+      </table><div class="rod">*Percentual de Valores diários fornecidos pela porção.</div></div>
+    <div class="dir"><div>Lote: ${esc(d.lote)}</div><div>Fab: ${dataBR(d.fab)}</div><div>Val: ${dataBR(d.val)}</div>${ean13Svg(d.ean || '')}</div></div>
+    <div class="pl">PESO LÍQUIDO ${esc(m.peso_liquido)}</div></div>`;
+}
+const somaDias = (d, n) => { const x = new Date(d + 'T12:00:00'); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
+
 // ───────── PESAGEM DE SAÍDA ─────────
 function avesPorProduto(planos) { const a = {}; for (const p of planos) for (const c of produtosDoPlano(p)) a[c] = (a[c] || 0) + p.aves; return a; }
 // por produto: previsto pelo plano, pesado na saída e rendimento real (kg pesados ÷ kg vivos destinados ao produto)
@@ -212,7 +274,7 @@ function tabelaComparativo(l, planos, pesagens, editavel = false) {
   const dif = x => x.real == null || x.prev == null ? '—' : (x.real - x.prev >= 0 ? '+' : '') + num(x.real - x.prev, 1);
   return `<table><tr><th>Produto</th><th class="n">Previsto (kg)</th><th class="n">Pesado (kg)</th><th class="n">Diferença (kg)</th><th class="n">Rend. previsto</th><th class="n">Rend. real</th>${editavel ? '<th></th>' : ''}</tr>
     ${c.map(x => `<tr><td>${esc(x.nome)}${x.foraDoPlano ? ' <span class="tag">fora do plano</span>' : ''}</td><td class="n">${x.prev == null ? '—' : num(x.prev, 1)}</td><td class="n">${x.real == null ? '<span class="mut">a pesar</span>' : num(x.real, 1)}</td><td class="n">${dif(x)}</td><td class="n">${num(x.pctPrev, 2)}%</td><td class="n">${x.pctReal == null ? '—' : num(x.pctReal, 2) + '%'}</td>
-      ${editavel ? `<td class="n lanc" data-prod="${x.codigo}"><button class="b sec" style="padding:4px 10px" data-lancar="${x.codigo}">${x.real == null ? 'Lançar peso' : 'Somar peso'}</button></td>` : ''}</tr>`).join('')}
+      ${editavel ? `<td class="n lanc" data-prod="${x.codigo}"><button class="b sec" style="padding:4px 10px" data-lancar="${x.codigo}">${x.real == null ? 'Lançar peso' : 'Somar peso'}</button> <button class="lnk" data-etq="${x.codigo}">etiquetas</button></td>` : ''}</tr>`).join('')}
     <tr class="tot"><td><b>Total</b></td><td class="n"><b>${tp ? num(tp, 1) : '—'}</b></td><td class="n"><b>${num(tr, 1)}</b></td><td></td><td></td><td class="n"><b>${l.peso_liquido_kg && tr ? num(100 * tr / l.peso_liquido_kg, 2) + '% do peso vivo' : ''}</b></td>${editavel ? '<td></td>' : ''}</tr></table>`;
 }
 
@@ -229,6 +291,8 @@ const F_LOTE = [
   { k:'tipo_ave', label:'Tipo de ave', type:'select', req:true, options:() => st.ref.tipos_ave.map(t => [t.codigo, `${t.codigo} · ${t.nome}`]) },
   { k:'motorista_id', label:'Motorista', type:'select', int:true, options:() => ativos('motoristas').map(c => [c.id, c.nome]) },
   { k:'veiculo_id', label:'Veículo', type:'select', int:true, options:() => ativos('veiculos').map(c => [c.id, c.placa]) },
+  { k:'gta', label:'Nº da GTA' }, { k:'propriedade', label:'Propriedade de origem' },
+  { k:'municipio_origem', label:'Município de origem' }, { k:'uf_origem', label:'UF' },
   { k:'peso_bruto_kg', label:'Peso bruto (kg)', type:'number' }, { k:'tara_kg', label:'Tara (kg)', type:'number' },
   { k:'qtd_caixas', label:'Qtd. de caixas', type:'number', step:1 }, { k:'aves_por_caixa', label:'Aves por caixa', type:'number', step:1 },
   { k:'mortos_chegada', label:'Mortos na chegada', type:'number', step:1, zero:true, def:0 },
@@ -250,6 +314,7 @@ async function telaDia() {
   const planos = lotes.length ? await q(sb.from('lote_planos').select('*').in('lote_id', lotes.map(l => l.id)).order('id')) : [];
   const pesagens = lotes.length ? await q(sb.from('lote_pesagens').select('*').in('lote_id', lotes.map(l => l.id)).order('id')) : [];
   const embSaidas = lotes.length ? await q(sb.from('embalagem_movimentos').select('*').in('lote_id', lotes.map(l => l.id)).order('id')) : [];
+  const conds = lotes.length ? await q(sb.from('lote_condenacoes').select('*').in('lote_id', lotes.map(l => l.id)).order('id')) : [];
   const embSaldos = lotes.length ? await q(sb.from('v_embalagem_saldo').select('*').in('cooperado_id', [...new Set(lotes.map(l => l.cooperado_id))]).order('nome')) : [];
   // dia fechado: vale o custo gravado no fechamento, não o recalculado
   if (dia && dia.fechado && dia.f_total != null) cd = { ...cd, custo_diaristas:dia.f_diaristas, custo_energia:dia.f_energia, custo_agua:dia.f_agua,
@@ -279,6 +344,8 @@ async function telaDia() {
   const embUsadas = id => { const t = {}; for (const m of embDe(id)) t[m.embalagem_id] = (t[m.embalagem_id] || 0) + m.quantidade;
     return Object.entries(t).map(([e, qtd]) => ({ nome:embNome(Number(e)), quantidade:qtd, saldo:(embSaldos.find(x => x.embalagem_id === Number(e)) || {}).saldo })); };
   const le = lotes.find(l => l.id === st.embLote);
+  const condsDe = id => conds.filter(c => c.lote_id === id);
+  const lc = lotes.find(l => l.id === st.condLote);
   main.innerHTML = topo + `
   ${semMensal ? `<div class="card aviso">Os custos mensais (mensalistas e demais custos) ainda não foram informados. O custo abaixo traz <b>somente os custos do dia</b> (diaristas, energia, água, limpeza e outros). <button class="lnk" id="bIrMes">Informar custos mensais</button></div>` : ''}
   <div class="card"><h2>Custo do dia</h2><div class="kpis">
@@ -333,6 +400,7 @@ async function telaDia() {
       <td>${embDe(l.id).length ? `<span class="tag ok">${num(embDe(l.id).reduce((a, m) => a + m.quantidade, 0))} un</span>` : '<span class="tag">sem baixa</span>'} <button class="lnk" data-emb="${l.id}">baixar</button></td>
       <td class="n"><b>${brl(custoLote(l.id))}</b></td>
       <td>${fx ? '' : (l.status === 'aberto' ? `<button class="lnk" data-st="${l.id}:em_producao">iniciar produção</button>` : l.status === 'em_producao' ? `<button class="lnk" data-st="${l.id}:finalizado">finalizar</button>` : `<button class="lnk" data-st="${l.id}:em_producao">reabrir lote</button>`)}
+        <button class="lnk" data-cond="${l.id}">condenações${condsDe(l.id).length ? ' (' + condsDe(l.id).reduce((a, c) => a + c.quantidade, 0) + ')' : ''}</button>
         <button class="lnk" data-rel="${l.id}">relatório</button>${fx ? '' : `<button class="lnk" data-edit="${l.id}">editar</button><button class="lnk" data-del="lotes:${l.id}">excluir</button>`}</td></tr>`).join('') || '<tr><td colspan="15" class="mut">Nenhum lote lançado.</td></tr>'}
     </table></div></div>
 
@@ -403,6 +471,18 @@ async function telaDia() {
       <td><button class="lnk" data-del="embalagem_movimentos:${m.id}">remover</button></td></tr>`).join('') || '<tr><td colspan="4" class="mut">Nenhuma baixa lançada.</td></tr>'}
     </table></div></div>`}
 
+  ${!lc ? '' : `<div class="card" id="cCond"><h2>Condenações totais · lote ${esc(lc.codigo)} · ${esc(nomeDe('cooperados', lc.cooperado_id))}</h2>
+    <p class="mut">Aves com condenação total pelo SIE, por enfermidade. Estas linhas alimentam o relatório de Ocorrências Sanitárias, e a soma delas passa a ser o total de condenadas do lote (aves condenadas não pagam).</p>
+    <div class="scroll"><table><tr><th>Enfermidade diagnosticada</th><th class="n">Aves</th><th></th></tr>
+    ${condsDe(lc.id).map(c => `<tr><td>${esc(c.enfermidade)}</td><td class="n">${num(c.quantidade)}</td><td>${fx ? '' : `<button class="lnk" data-del="lote_condenacoes:${c.id}">remover</button>`}</td></tr>`).join('') || '<tr><td colspan="3" class="mut">Nenhuma condenação detalhada.</td></tr>'}
+    <tr><td><b>Total de condenadas do lote</b></td><td class="n"><b>${num(lc.condenadas)}</b></td><td></td></tr></table></div>
+    ${fx ? '<p class="mut">Dia fechado: as condenações não podem mais ser alteradas.</p>' : `<form id="fCond" class="row" style="margin-top:10px">
+      <label>Enfermidade <input name="enfermidade" list="dlEnf" required autocomplete="off" style="width:260px" placeholder="digite ou escolha">
+        <datalist id="dlEnf">${ENFERMIDADES.map(x => `<option value="${x}"></option>`).join('')}</datalist></label>
+      <label>Aves <input name="quantidade" type="number" step="1" min="1" required style="width:100px"></label>
+      <button class="b">Adicionar</button></form>`}
+    <p style="margin:12px 0 0"><button type="button" class="b sec" id="bFecharCond">Fechar painel</button></p></div>`}
+
   <div class="card" id="cLote"><h2 id="tLote">Novo lote</h2>
     <form id="fLote"><div class="grid">${campos(F_LOTE, { ordem: (lotes.at(-1)?.ordem || 0) + 1 }, fx)}</div>
       <p><button class="b" ${fx ? 'disabled' : ''}>Salvar lote</button> <button type="button" class="b sec" id="bLimpar" hidden>Cancelar edição</button></p></form></div>`;
@@ -427,6 +507,11 @@ async function telaDia() {
   const fL = $('#fLote'); let editando = null;
   const travaCarcacas = () => { const el = fL.elements.carcacas_contadas, pesado = fL.elements.peso_bruto_kg.value !== ''; if (pesado) el.value = ''; el.disabled = pesado || fx; };
   fL.oninput = e => { if (e.target.name === 'peso_bruto_kg') travaCarcacas(); };
+  // origem das aves vem do cadastro do cooperado e pode ser ajustada no lote
+  const origemDoCooperado = forcar => { const c = st.ref.cooperados.find(x => x.id === Number(fL.elements.cooperado_id.value)); if (!c) return;
+    for (const [campo, v] of [['propriedade', c.propriedade], ['municipio_origem', c.municipio], ['uf_origem', c.uf]]) if (forcar || !fL.elements[campo].value) fL.elements[campo].value = v || ''; };
+  fL.elements.cooperado_id.onchange = () => origemDoCooperado(true);
+  if (!fx) origemDoCooperado(false);
   fL.elements.veiculo_id.onchange = e => { const v = st.ref.veiculos.find(x => x.id === Number(e.target.value)); if (v && v.tara_kg != null && !fL.elements.tara_kg.value) fL.elements.tara_kg.value = v.tara_kg; };
   fL.onsubmit = async e => { e.preventDefault(); try {
     const o = ler(fL, F_LOTE);
@@ -452,6 +537,9 @@ async function telaDia() {
     if (t.id === 'bFecharEmb') { st.embLote = null; render(); }
     if (t.id === 'bIrEmb') { st.embCoop = le.cooperado_id; st.tab = 'emb'; render(); }
     if (t.dataset.baixar) abrirBaixa(Number(t.dataset.baixar));
+    if (t.dataset.cond) { st.condLote = Number(t.dataset.cond); await render(); const c = $('#cCond'); if (c) c.scrollIntoView({ behavior:'smooth' }); }
+    if (t.id === 'bFecharCond') { st.condLote = null; render(); }
+    if (t.dataset.etq) abrirEtq(t.dataset.etq);
     if (t.dataset.cancelar) render();
     if (t.dataset.st) { const [id, novo] = t.dataset.st.split(':'), l = lotes.find(x => x.id === Number(id)), agora = new Date().toTimeString().slice(0, 5), up = { status:novo, finalizado_em:null };
       if (novo === 'em_producao' && !l.hora_inicio) up.hora_inicio = agora;
@@ -462,6 +550,32 @@ async function telaDia() {
     if (t.id === 'bIrMes') { st.mes = d.slice(0, 7); st.tab = 'mes'; render(); }
     if (t.dataset.rel) { const l = lotes.find(x => x.id === Number(t.dataset.rel)); relatorio(l, cd, lotes, custoLote, planosDe(l.id), fx, pesagensDe(l.id), embUsadas(l.id)); }
   };
+  const fCo = $('#fCond');
+  if (fCo) fCo.onsubmit = async e => { e.preventDefault(); try {
+    await q(sb.from('lote_condenacoes').insert({ lote_id:lc.id, enfermidade:fCo.elements.enfermidade.value.trim(), quantidade:Number(fCo.elements.quantidade.value) })); await render(); const n = $('#fCond'); if (n) n.elements.enfermidade.focus(); } catch (er) { falha(er); } };
+  // impressão de etiquetas direto na linha do produto
+  function abrirEtq(cod) {
+    const td = main.querySelector(`td.lanc[data-prod="${cod}"]`); if (!td || !lw) return;
+    const modelo = st.ref.etiquetas.find(x => x.produto === cod);
+    if (!modelo) return alert(`O produto "${nomeProduto(cod)}" ainda não tem etiqueta cadastrada. Cadastre em Cadastros → Etiquetas.`);
+    const cons = (planosDe(lw.id).find(p => produtosDoPlano(p).includes(cod)) || pesagensDe(lw.id).find(p => p.produto === cod) || {}).conservacao || 'congelado';
+    const vol = pesagensDe(lw.id).filter(p => p.produto === cod).reduce((a, p) => a + (p.volumes || 0), 0);
+    const validade = c => { const dd = c === 'congelado' ? modelo.validade_congelado_dias : modelo.validade_resfriado_dias; return dd ? somaDias(lw.data, dd) : ''; };
+    td.innerHTML = `<form class="row" style="gap:6px;justify-content:flex-end;flex-wrap:nowrap;align-items:center">
+      <input name="qtd" type="number" step="1" min="1" max="500" required placeholder="qtd." value="${vol || ''}" style="width:76px;text-align:right" title="quantidade de etiquetas">
+      <select name="conservacao"><option value="resfriado" ${cons === 'resfriado' ? 'selected' : ''}>Resfriado</option><option value="congelado" ${cons === 'congelado' ? 'selected' : ''}>Congelado</option></select>
+      <input name="val" type="date" required value="${validade(cons)}" title="validade">
+      <button class="b" style="padding:5px 12px">Imprimir</button><button type="button" class="lnk" data-cancelar="1">cancelar</button></form>`;
+    const fm = td.querySelector('form');
+    fm.elements.conservacao.onchange = () => { fm.elements.val.value = validade(fm.elements.conservacao.value); };
+    fm.onsubmit = e => { e.preventDefault();
+      const ean = eanDe(cod, lw.cooperado_id);
+      if (ean && !eanValido(ean)) return alert('O código de barras cadastrado para este produto é inválido. Corrija em Cadastros → Etiquetas.');
+      const uma = etiquetaHtml({ modelo, lote:lw.codigo, fab:lw.data, val:fm.elements.val.value, ean });
+      $('#rel').innerHTML = uma.repeat(Number(fm.elements.qtd.value));
+      imprimir('@page { size:105mm 75mm; margin:0 }', 'etqs'); };
+    fm.elements.qtd.focus();
+  }
   // baixa de embalagem direto na linha
   function abrirBaixa(id) {
     const td = main.querySelector(`td.baixa[data-emb-id="${id}"]`); if (!td || !le) return;
@@ -561,7 +675,7 @@ function relatorio(l, cd, lotes, custoLote, planos, fechado, pesagens, embalagen
     <p>${num(l.cabecas_pagantes)} cabeças × R$ ${num(porCab, 4)} por cabeça = <b>${brl(custoLote(l.id))}</b></p>
     <p style="font-size:11px">Energia e água são apuradas no dia pela leitura dos medidores e pela tarifa da última conta. A diferença para a conta real do mês é rateada por cabeça abatida no fechamento mensal e informada em relatório complementar.</p>
     <p style="font-size:11px">Emitido em ${new Date().toLocaleString('pt-BR')}.</p>`;
-  window.print();
+  imprimir();
 }
 
 // ───────── FECHAMENTO MENSAL ─────────
@@ -656,7 +770,7 @@ function romaneio(exp, itens, lotes) {
     <p style="font-size:11px">Declaro ter recebido os produtos acima, conferidos em quantidade e peso no ato da retirada.</p>
     <div class="assin"><div>Fort Aves · responsável pela expedição</div><div>Cooperado ou portador · ${esc(exp.retirado_por) || ''}</div></div>
     <p style="font-size:11px;margin-top:20px">Emitido em ${new Date().toLocaleString('pt-BR')}.</p>`;
-  window.print();
+  imprimir();
 }
 async function telaCam() {
   const coops = ativos('cooperados');
@@ -788,15 +902,113 @@ async function telaEmb() {
     } catch (er) { falha(er); } };
 }
 
+// ───────── RELATÓRIOS DO SIE ─────────
+const ENFERMIDADES = ['Aerossaculite', 'Artrite', 'Ascite', 'Aspecto repugnante', 'Caquexia', 'Celulite', 'Colibacilose', 'Contaminação', 'Contusão / fratura', 'Dermatose', 'Escaldagem excessiva', 'Má sangria', 'Neoplasia', 'Salpingite', 'Septicemia'];
+const MESES = ['JANEIRO', 'FEVEREIRO', 'MARÇO', 'ABRIL', 'MAIO', 'JUNHO', 'JULHO', 'AGOSTO', 'SETEMBRO', 'OUTUBRO', 'NOVEMBRO', 'DEZEMBRO'];
+async function telaSie() {
+  const mes = st.sieMes = st.sieMes || hoje().slice(0, 7), ini = mes + '-01', [a, m] = mes.split('-').map(Number), fim = `${m === 12 ? a + 1 : a}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01`;
+  const lotes = await q(sb.from('lotes').select('*').gte('data', ini).lt('data', fim).order('data').order('ordem'));
+  const conds = lotes.length ? await q(sb.from('lote_condenacoes').select('*').in('lote_id', lotes.map(l => l.id)).order('id')) : [];
+  const E = st.ref.estab, abatidas = l => l.carcacas_contadas != null && l.aves_recebidas == null ? l.carcacas_contadas : (l.aves_recebidas || 0) - (l.mortos_chegada || 0);
+  const total = lotes.reduce((s, l) => s + abatidas(l), 0), semGta = lotes.filter(l => !l.gta).length, semMun = lotes.filter(l => !l.municipio_origem).length;
+  const semDet = lotes.filter(l => l.condenadas > 0 && !conds.some(c => c.lote_id === l.id)).length;
+  const linhasMapa = lotes.map(l => `<tr><td>${dataBR(l.data)}</td><td>${esc(E.especie || '')}</td><td>${esc(nomeDe('cooperados', l.cooperado_id))}</td><td>${esc(l.municipio_origem)}</td><td>${esc(l.gta)}</td><td class="n">${num(abatidas(l))}</td></tr>`).join('');
+  const ocorr = conds.map(c => ({ c, l:lotes.find(x => x.id === c.lote_id) }));
+  const linhasOc = ocorr.map(({ c, l }) => `<tr><td>${dataBR(l.data)}</td><td>${esc(nomeDe('cooperados', l.cooperado_id))}</td><td>${esc(l.propriedade)}</td><td>${esc(l.municipio_origem)}</td><td>${esc(l.uf_origem)}</td><td>${esc(c.enfermidade)}</td><td>${esc(E.especie || '')}</td><td></td><td></td><td class="n">${num(c.quantidade)}</td><td>${esc(E.municipio_abate || '')}</td></tr>`).join('');
+  const cabMapa = '<tr><th>DATA</th><th>ESPÉCIE</th><th>NOME DO PRODUTOR</th><th>MUNICÍPIO</th><th>GTA</th><th>Nº DE AVES</th></tr>';
+  const cabOc = '<tr><th>DATA ABATE</th><th>PROPRIETÁRIO</th><th>PROPRIEDADE</th><th>MUNICÍPIO DE ORIGEM DOS ANIMAIS</th><th>UF</th><th>ENFERMIDADE DIAGNOSTICADA</th><th>ESPÉCIE</th><th>M</th><th>F</th><th>TOTAL</th><th>MUNICÍPIO EM QUE OS ANIMAIS FORAM ABATIDOS</th></tr>';
+  main.innerHTML = `<div class="card row"><label>Mês <input type="month" id="sMes" value="${mes}"></label>
+      <button class="b" id="bMapa" ${lotes.length ? '' : 'disabled'}>Imprimir Mapa de Abate</button>
+      <button class="b" id="bOcorr" ${lotes.length ? '' : 'disabled'}>Imprimir Ocorrências Sanitárias</button></div>
+    ${semGta || semMun || semDet ? `<div class="card aviso">Pendências para os relatórios deste mês: ${[semGta ? semGta + ' lote(s) sem número de GTA' : '', semMun ? semMun + ' lote(s) sem município de origem' : '', semDet ? semDet + ' lote(s) com condenadas sem detalhar a enfermidade' : ''].filter(Boolean).join('; ')}. Complete em Dia de produção (editar o lote ou "condenações").</div>` : ''}
+    <div class="card"><h2>Mapa de Abate · ${MESES[m - 1]}/${a}</h2><p class="mut">Número de aves = aves efetivamente abatidas (recebidas menos mortas na chegada).</p>
+      <div class="scroll"><table>${cabMapa}${linhasMapa || '<tr><td colspan="6" class="mut">Nenhum lote no mês.</td></tr>'}<tr><td colspan="5"><b>TOTAL</b></td><td class="n"><b>${num(total)}</b></td></tr></table></div></div>
+    <div class="card"><h2>Ocorrências sanitárias · condensado mensal</h2><p class="mut">Uma linha por enfermidade registrada nas condenações totais de cada lote.</p>
+      <div class="scroll"><table>${cabOc}${linhasOc || '<tr><td colspan="11" class="mut">Nenhuma condenação detalhada no mês.</td></tr>'}</table></div></div>`;
+  $('#sMes').onchange = e => { st.sieMes = e.target.value; render(); };
+  $('#bMapa').onclick = () => { $('#rel').innerHTML = `
+    <div style="display:flex;gap:16px;align-items:center"><img src="logo.svg" alt="Fort Aves" style="height:44px"><div class="cab"><b>${esc((E.razao_social || '').toUpperCase())}${E.sigla ? ' - ' + esc(E.sigla) : ''}</b><br>
+      CNPJ: ${esc(E.cnpj)}, INSCRIÇÃO ESTADUAL: ${esc(E.inscricao_estadual)}; Nº REGISTRO NO CRMV: ${esc(E.registro_crmv)}<br>
+      ABATEDOURO DE AVES - REGISTRO NO SIE Nº ${esc(E.registro_sie)}<br>ENDEREÇO: ${esc((E.endereco || '').toUpperCase())}</div></div>
+    <h3>MAPA DE ABATE - ${MESES[m - 1]}/${a}</h3>
+    <table class="gr">${cabMapa}${linhasMapa}<tr><td colspan="4" style="border:0"></td><th>TOTAL</th><th class="n">${num(total)}</th></tr></table>
+    <p style="margin-top:40px;font-size:12px;line-height:1.5"><b>${esc((E.rt_nome || '').toUpperCase())}</b><br>${esc((E.rt_titulo || '').toUpperCase())}<br>CRMV ${esc(E.rt_crmv)}</p>`; imprimir(); };
+  $('#bOcorr').onclick = () => { $('#rel').innerHTML = `
+    <div class="gov"><b>GOVERNO DA PARAÍBA</b><br>SECRETARIA DE ESTADO DO DESENVOLVIMENTO DA AGROPECUÁRIA E DA PESCA<br>GERÊNCIA EXECUTIVA DE DEFESA AGROPECUÁRIA<br>GERÊNCIA OPERACIONAL DE DEFESA ANIMAL<br>COORDENAÇÃO DE EPIDEMIOLOGIA E ANÁLISE DE RISCO</div>
+    <h3>OCORRÊNCIAS SANITÁRIAS EM ESTABELECIMENTOS DE ABATE - CONDENSADO MENSAL</h3>
+    <p style="display:flex;justify-content:space-around;font-size:12px"><span><b>ULSAV:</b> ${esc(E.ulsav) || '____________________'}</span><span><b>MÊS:</b> ${MESES[m - 1]}</span><span><b>ANO:</b> ${a}</span></p>
+    <table class="gr"><tr><th rowspan="2">DATA ABATE</th><th rowspan="2">PROPRIETÁRIO</th><th rowspan="2">PROPRIEDADE</th><th rowspan="2">MUNICÍPIO DE ORIGEM DOS ANIMAIS</th><th rowspan="2">UF</th><th rowspan="2">ENFERMIDADE DIAGNOSTICADA</th><th colspan="4">ANIMAIS AFETADOS</th><th rowspan="2">MUNICÍPIO EM QUE OS ANIMAIS FORAM ABATIDOS</th></tr>
+      <tr><th>ESPÉCIE</th><th>M</th><th>F</th><th>TOTAL</th></tr>${linhasOc || '<tr><td colspan="11" style="text-align:center">Sem ocorrências no mês.</td></tr>'}</table>
+    <p style="margin-top:50px;text-align:right;font-size:11px">_______________________________________<br>CARIMBO / ASSINATURA SERVIDOR</p>`; imprimir('@page { size:A4 landscape; margin:10mm }'); };
+}
+
+// ───────── CADASTRO DE ETIQUETAS ─────────
+async function telaEtiquetas() {
+  const prods = st.ref.produtos; if (!prods.some(p => p.codigo === st.etqProd)) st.etqProd = (st.ref.etiquetas[0] || prods[0]).produto || prods[0].codigo;
+  const cod = st.etqProd, m = st.ref.etiquetas.find(x => x.produto === cod) || { produto:cod, nome_impresso:nomeProduto(cod).toUpperCase(), peso_liquido:'1 Kg', nutrientes:{}, validade_congelado_dias:365 }, n = m.nutrientes || {};
+  const eanCoop = id => (st.ref.eans.find(x => x.produto === cod && x.cooperado_id === id) || {}).ean || '';
+  main.innerHTML = abasCad() + `<div class="card row"><label>Produto <select id="eProd">${prods.map(p => `<option value="${p.codigo}" ${p.codigo === cod ? 'selected' : ''}>${esc(p.nome)}${st.ref.etiquetas.some(x => x.produto === p.codigo) ? '' : ' (sem etiqueta)'}</option>`).join('')}</select></label></div>
+  <div class="card"><h2>Etiqueta · ${esc(nomeProduto(cod))}</h2>
+    <form id="fEtq"><div class="grid">
+      <label>Nome impresso <input name="nome_impresso" required value="${esc(m.nome_impresso)}"></label>
+      <label>Peso líquido <input name="peso_liquido" required value="${esc(m.peso_liquido)}"></label>
+      <label>Porções por embalagem <input name="porcoes_emb" value="${esc(m.porcoes_emb)}" placeholder="cerca de 10"></label>
+      <label>Porção (g) <input name="porcao_g" type="number" step="0.01" value="${m.porcao_g ?? ''}"></label>
+      <label>Medida caseira da porção <input name="porcao_desc" value="${esc(m.porcao_desc)}" placeholder="1 Fração"></label>
+      <label>Validade resfriado (dias) <input name="validade_resfriado_dias" type="number" step="1" min="1" value="${m.validade_resfriado_dias ?? ''}"></label>
+      <label>Validade congelado (dias) <input name="validade_congelado_dias" type="number" step="1" min="1" value="${m.validade_congelado_dias ?? ''}"></label>
+      <label>Código de barras padrão (EAN-13) <input name="ean" value="${esc(m.ean)}" inputmode="numeric" maxlength="13"></label></div>
+    <h2 style="margin-top:16px">Informação nutricional</h2>
+    <div class="scroll"><table style="max-width:640px"><tr><th>Item</th><th class="n">Por 100 g</th><th class="n">Por porção</th><th class="n">% VD</th></tr>
+      ${NUT.map(([k, r]) => `<tr><td>${r}</td><td class="n"><input name="n_${k}" type="number" step="0.01" min="0" style="width:90px;text-align:right" value="${(n[k] || {}).v100 ?? ''}"></td><td class="n" data-porc="${k}"></td><td class="n"><input name="vd_${k}" type="number" step="0.01" min="0" style="width:80px;text-align:right" value="${(n[k] || {}).vd ?? ''}"></td></tr>`).join('')}</table></div>
+    <p class="mut" style="margin:6px 0 0">O valor por porção é calculado (por 100 g × porção). <button type="button" class="lnk" id="bVd">Preencher % VD</button> usa o mesmo critério da etiqueta atual de sobrecoxa (valor por 100 g sobre o valor diário de referência); confira com o responsável técnico.</p>
+    <h2 style="margin-top:16px">Código de barras por cooperado</h2>
+    <p class="mut">Preencha só se o cooperado tiver código próprio para este produto; em branco, usa o código padrão acima.</p>
+    <div class="grid">${ativos('cooperados').map(c => `<label>${esc(c.nome)} <input name="ean_${c.id}" value="${esc(eanCoop(c.id))}" inputmode="numeric" maxlength="13"></label>`).join('')}</div>
+    <p style="margin-top:14px"><button class="b">Salvar etiqueta</button></p></form></div>
+  <div class="card"><h2>Pré-visualização (105 × 75 mm)</h2><div class="previa-etq" id="pvEtq"></div>
+    <p class="mut" style="margin:8px 0 0">Lote, fabricação e validade são preenchidos na impressão, a partir do lote. Para imprimir: Dia de produção → "pesar" no lote → "etiquetas" na linha do produto.</p></div>`;
+  const f = $('#fEtq');
+  const ler1 = () => { const nut = {}; for (const [k] of NUT) { const v = f.elements['n_' + k].value, d = f.elements['vd_' + k].value; if (v !== '' || d !== '') nut[k] = { v100: v === '' ? null : Number(v), vd: d === '' ? null : Number(d) }; }
+    const num1 = k => f.elements[k].value === '' ? null : Number(f.elements[k].value), txt = k => f.elements[k].value.trim() || null;
+    return { produto:cod, nome_impresso:f.elements.nome_impresso.value.trim(), peso_liquido:f.elements.peso_liquido.value.trim(), porcoes_emb:txt('porcoes_emb'), porcao_g:num1('porcao_g'), porcao_desc:txt('porcao_desc'),
+      nutrientes:nut, validade_resfriado_dias:num1('validade_resfriado_dias'), validade_congelado_dias:num1('validade_congelado_dias'), ean:txt('ean') }; };
+  const previa = () => { const o = ler1(), porc = o.porcao_g;
+    for (const [k] of NUT) { const v = f.elements['n_' + k].value; main.querySelector(`[data-porc="${k}"]`).textContent = v === '' || !porc ? '' : nd(Number(v) * porc / 100); }
+    $('#pvEtq').innerHTML = etiquetaHtml({ modelo:o, lote:hoje().replaceAll('-', '') + '-01', fab:hoje(), val:somaDias(hoje(), o.validade_congelado_dias || 365), ean:o.ean || '' }); };
+  f.oninput = previa; previa();
+  $('#eProd').onchange = e => { st.etqProd = e.target.value; render(); };
+  $('#bVd').onclick = () => { for (const [k] of NUT) { const v = f.elements['n_' + k].value; if (v !== '' && VDR[k]) f.elements['vd_' + k].value = Math.round(Number(v) * 100 / VDR[k]); else if (v !== '' && Number(v) === 0) f.elements['vd_' + k].value = 0; } previa(); };
+  f.onsubmit = async e => { e.preventDefault(); try {
+    const o = ler1(), ruins = [o.ean, ...ativos('cooperados').map(c => f.elements['ean_' + c.id].value.trim())].filter(x => x && !eanValido(x));
+    if (ruins.length) return alert(`Código de barras inválido: ${ruins.join(', ')}. O EAN-13 tem 13 dígitos e o último é verificador.`);
+    await q(sb.from('etiquetas').upsert(o));
+    for (const c of ativos('cooperados')) { const v = f.elements['ean_' + c.id].value.trim();
+      if (v) await q(sb.from('etiqueta_eans').upsert({ cooperado_id:c.id, produto:cod, ean:v })); else if (eanCoop(c.id)) await q(sb.from('etiqueta_eans').delete().eq('cooperado_id', c.id).eq('produto', cod)); }
+    await carregarRef(); render(); } catch (er) { falha(er); } };
+  main.onclick = e => { if (e.target.dataset.cad) { st.cad = e.target.dataset.cad; render(); } };
+}
+
+// ───────── DADOS DO ESTABELECIMENTO ─────────
+const F_ESTAB = [{ k:'razao_social', label:'Razão social' }, { k:'sigla', label:'Sigla' }, { k:'cnpj', label:'CNPJ' }, { k:'inscricao_estadual', label:'Inscrição estadual' }, { k:'registro_sie', label:'Registro no SIE' },
+  { k:'registro_crmv', label:'Registro no CRMV' }, { k:'endereco', label:'Endereço' }, { k:'municipio_abate', label:'Município de abate' }, { k:'uf', label:'UF' }, { k:'ulsav', label:'ULSAV' },
+  { k:'especie', label:'Espécie (como sai nos relatórios)' }, { k:'rt_nome', label:'Responsável técnico' }, { k:'rt_titulo', label:'Título do responsável técnico' }, { k:'rt_crmv', label:'CRMV do responsável técnico' }];
+function telaEstab() {
+  main.innerHTML = abasCad() + `<div class="card"><h2>Dados do estabelecimento</h2><p class="mut">Usados no cabeçalho do Mapa de Abate e no relatório de Ocorrências Sanitárias.</p>
+    <form id="fEst"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">${campos(F_ESTAB, st.ref.estab)}</div><p><button class="b">Salvar</button></p></form></div>`;
+  $('#fEst').onsubmit = async e => { e.preventDefault(); try { await q(sb.from('estabelecimento').upsert({ id:1, ...ler(e.target, F_ESTAB) })); await carregarRef(); render(); } catch (er) { falha(er); } };
+  main.onclick = e => { if (e.target.dataset.cad) { st.cad = e.target.dataset.cad; render(); } };
+}
+
 // ───────── CADASTROS ─────────
 const CAD = {
-  cooperados:   { nome:'Cooperados', f:[{ k:'nome', label:'Nome', req:true }, { k:'documento', label:'CPF/CNPJ' }, { k:'telefone', label:'Telefone' }, { k:'ativo', label:'Ativo', type:'checkbox' }] },
+  cooperados:   { nome:'Cooperados', f:[{ k:'nome', label:'Nome', req:true }, { k:'documento', label:'CPF/CNPJ' }, { k:'telefone', label:'Telefone' }, { k:'propriedade', label:'Propriedade (granja)' }, { k:'municipio', label:'Município' }, { k:'uf', label:'UF', def:'PB' }, { k:'ativo', label:'Ativo', type:'checkbox' }] },
   motoristas:   { nome:'Motoristas', f:[{ k:'nome', label:'Nome', req:true }, { k:'ativo', label:'Ativo', type:'checkbox' }] },
   veiculos:     { nome:'Veículos', f:[{ k:'placa', label:'Placa', req:true }, { k:'descricao', label:'Descrição' }, { k:'tara_kg', label:'Tara (kg)', type:'number' }, { k:'ativo', label:'Ativo', type:'checkbox' }] },
   funcionarios: { nome:'Equipe', f:[{ k:'nome', label:'Nome', req:true }, { k:'vinculo', label:'Vínculo', type:'select', req:true, options:() => [['diarista', 'Diarista'], ['fixo', 'Fixo (mensalista)']] },
                   { k:'funcao', label:'Função' }, { k:'valor_diaria', label:'Diária (R$)', type:'number' }, { k:'salario_mensal', label:'Custo mensal (R$)', type:'number' }, { k:'ativo', label:'Ativo', type:'checkbox' }] } };
 
-const abasCad = () => `<div class="card row">${Object.entries(CAD).map(([k, v]) => `<button class="b ${k === st.cad ? '' : 'sec'}" data-cad="${k}">${v.nome}</button>`).join('')}<button class="b ${st.cad === 'rendimentos' ? '' : 'sec'}" data-cad="rendimentos">Rendimentos</button></div>`;
+const abasCad = () => `<div class="card row">${Object.entries(CAD).map(([k, v]) => `<button class="b ${k === st.cad ? '' : 'sec'}" data-cad="${k}">${v.nome}</button>`).join('')}<button class="b ${st.cad === 'rendimentos' ? '' : 'sec'}" data-cad="rendimentos">Rendimentos</button><button class="b ${st.cad === 'etiquetas' ? '' : 'sec'}" data-cad="etiquetas">Etiquetas</button><button class="b ${st.cad === 'estab' ? '' : 'sec'}" data-cad="estab">Estabelecimento</button></div>`;
 async function telaRendimentos() {
   const tipos = st.ref.tipos_ave, reais = await q(sb.from('v_rendimento_real').select('*'));
   const realDe = (t, p) => reais.find(r => r.tipo_ave === t && r.produto === p);
@@ -819,6 +1031,8 @@ async function telaRendimentos() {
 }
 function telaCad() {
   if (st.cad === 'rendimentos') return telaRendimentos();
+  if (st.cad === 'etiquetas') return telaEtiquetas();
+  if (st.cad === 'estab') return telaEstab();
   const c = CAD[st.cad], lista = st.ref[st.cad];
   const cel = (x, f) => f.type === 'checkbox' ? (x[f.k] ? 'sim' : 'não') : f.type === 'number' ? num(x[f.k], 2) : esc(x[f.k]);
   main.innerHTML = abasCad() + `
@@ -871,7 +1085,7 @@ async function telaUsuarios() {
 async function render() {
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === st.tab));
   main.onclick = null; main.onchange = null;
-  try { await ({ dia:telaDia, mes:telaMes, cam:telaCam, emb:telaEmb, cad:telaCad, usu:telaUsuarios })[st.tab](); }
+  try { await ({ dia:telaDia, mes:telaMes, cam:telaCam, sie:telaSie, emb:telaEmb, cad:telaCad, usu:telaUsuarios })[st.tab](); }
   catch (e) { main.innerHTML = `<div class="card"><p class="msg">Erro ao carregar: ${esc(e.message)}</p></div>`; }
 }
 $('#nav').onclick = e => { if (e.target.dataset.tab) { st.tab = e.target.dataset.tab; render(); } };
