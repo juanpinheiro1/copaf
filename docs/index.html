@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="google" content="notranslate">
-<link rel="icon" href="logo.svg">
-<title>Fort Aves · Gestão do Abatedouro</title>
+<link rel="icon" href="logo-copaf.jpg">
+<title>COPAF · Gestão do Abatedouro</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <style>
   :root { --bg:#f4f5f2; --card:#fff; --ink:#1d2a22; --mut:#66736b; --line:#dfe3dc; --pri:#0f8a41; --pri2:#e5f4eb; --warn:#b4541a; --err:#b3261e; --red:#ec1f27; }
@@ -13,7 +13,7 @@
   [hidden] { display:none !important; }
   body { margin:0; font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
   header { background:#fff; color:var(--ink); border-bottom:3px solid var(--pri); padding:8px 20px; display:flex; align-items:center; gap:24px; flex-wrap:wrap; }
-  header img { height:34px; display:block; }
+  header img { height:46px; display:block; }
   nav { display:flex; gap:4px; flex:1; }
   nav button { background:transparent; color:var(--ink); border:0; padding:8px 14px; border-radius:6px; font:inherit; cursor:pointer; }
   nav button.on { background:var(--pri); color:#fff; font-weight:600; }
@@ -85,7 +85,7 @@
 </head>
 <body>
 <div id="login" class="card" hidden>
-  <img src="logo.svg" alt="Fort Aves" style="width:210px;display:block;margin:6px auto 4px">
+  <img src="logo-copaf.jpg" alt="COPAF" style="width:150px;display:block;margin:0 auto 4px">
   <p class="mut" style="text-align:center;margin:0 0 14px">Gestão do Abatedouro</p>
   <form id="fLogin">
     <label>E-mail <input type="email" id="lEmail" required autocomplete="username"></label>
@@ -107,7 +107,7 @@
 </div>
 
 <header id="top" hidden>
-  <img src="logo.svg" alt="Fort Aves">
+  <img src="logo-copaf.jpg" alt="COPAF">
   <nav id="nav">
     <button data-tab="dia">Dia de produção</button>
     <button data-tab="mes">Fechamento mensal</button>
@@ -240,7 +240,7 @@ function ean13Svg(e) {
   const txt = (x, t) => `<text x="${x}" y="66" font-size="9" font-family="Arial,Helvetica,sans-serif" text-anchor="middle">${t}</text>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 117 68" shape-rendering="crispEdges" fill="#000">${r}${txt(5, e[0])}${txt(35, e.slice(1, 7).split('').join(' '))}${txt(82, e.slice(7).split('').join(' '))}</svg>`;
 }
-const eanDe = (produto, cooperado) => (st.ref.eans.find(x => x.produto === produto && x.cooperado_id === cooperado) || {}).ean || (st.ref.etiquetas.find(x => x.produto === produto) || {}).ean || '';
+const eanDe = (produto, cooperado) => (st.ref.eans.find(x => x.produto === produto && x.cooperado_id === cooperado) || {}).ean || '';
 // d: { modelo (linha de etiquetas), lote, fab, val, ean }
 function etiquetaHtml(d) {
   const m = d.modelo, n = m.nutrientes || {}, porc = m.porcao_g ? Number(m.porcao_g) : null;
@@ -570,6 +570,7 @@ async function telaDia() {
     fm.elements.conservacao.onchange = () => { fm.elements.val.value = validade(fm.elements.conservacao.value); };
     fm.onsubmit = e => { e.preventDefault();
       const ean = eanDe(cod, lw.cooperado_id);
+      if (!ean && !confirm(`${nomeDe('cooperados', lw.cooperado_id)} não tem código de barras cadastrado para ${nomeProduto(cod)}. Imprimir a etiqueta sem código de barras?`)) return;
       if (ean && !eanValido(ean)) return alert('O código de barras cadastrado para este produto é inválido. Corrija em Cadastros → Etiquetas.');
       const uma = etiquetaHtml({ modelo, lote:lw.codigo, fab:lw.data, val:fm.elements.val.value, ean });
       $('#rel').innerHTML = uma.repeat(Number(fm.elements.qtd.value));
@@ -645,7 +646,7 @@ function relatorio(l, cd, lotes, custoLote, planos, fechado, pesagens, embalagen
   const porCab = cd.custo_total / cd.cabecas_dia, part = l.cabecas_pagantes / cd.cabecas_dia, semMensal = !Number(cd.parcela_custos_mensais);
   const linha = (nome, v) => `<tr><td>${nome}</td><td class="n">${brl(v)}</td><td class="n">${brl(v * part)}</td></tr>`;
   $('#rel').innerHTML = `
-    <img src="logo.svg" alt="Fort Aves" style="height:48px"><p>Abatedouro · Relatório de custo operacional do lote</p>
+    <img src="logo-copaf.jpg" alt="COPAF" style="height:70px"><p>Abatedouro · Relatório de custo operacional do lote</p>
     ${fechado ? '' : '<p class="previa">PRÉVIA · dia ainda não fechado, valores sujeitos a alteração</p>'}
     <h2>Lote ${esc(l.codigo)}</h2>
     <table><tr><td>Cooperado</td><td><b>${esc(nomeDe('cooperados', l.cooperado_id))}</b></td><td>Data do abate</td><td><b>${dataBR(l.data)}</b></td></tr>
@@ -758,7 +759,7 @@ const CONS = { resfriado:'Resfriado', congelado:'Congelado' };
 function romaneio(exp, itens, lotes) {
   const cod = id => (lotes.find(l => l.id === id) || {}).codigo || id, tk = itens.reduce((a, x) => a + Number(x.peso_kg), 0), tv = itens.reduce((a, x) => a + (x.volumes || 0), 0);
   $('#rel').innerHTML = `
-    <img src="logo.svg" alt="Fort Aves" style="height:48px"><p>Abatedouro · Romaneio de retirada de produtos</p>
+    <img src="logo-copaf.jpg" alt="COPAF" style="height:70px"><p>Abatedouro · Romaneio de retirada de produtos</p>
     <h2>Retirada nº ${exp.id}</h2>
     <table><tr><td>Cooperado</td><td><b>${esc(nomeDe('cooperados', exp.cooperado_id))}</b></td><td>Data da retirada</td><td><b>${dataBR(exp.data)}</b></td></tr>
       <tr><td>Retirado por</td><td>${esc(exp.retirado_por) || '—'}</td><td>Documento</td><td>${esc(exp.documento) || '—'}</td></tr>
@@ -768,7 +769,7 @@ function romaneio(exp, itens, lotes) {
       ${itens.map(x => `<tr><td>${esc(cod(x.lote_id))}</td><td>${esc(nomeProduto(x.produto))}</td><td>${CONS[x.conservacao]}</td><td class="n">${x.volumes ? num(x.volumes) : '—'}</td><td class="n">${num(x.peso_kg, 2)}</td></tr>`).join('')}
       <tr class="tot"><td colspan="3">Total</td><td class="n">${tv ? num(tv) : '—'}</td><td class="n">${num(tk, 2)}</td></tr></table>
     <p style="font-size:11px">Declaro ter recebido os produtos acima, conferidos em quantidade e peso no ato da retirada.</p>
-    <div class="assin"><div>Fort Aves · responsável pela expedição</div><div>Cooperado ou portador · ${esc(exp.retirado_por) || ''}</div></div>
+    <div class="assin"><div>COPAF · responsável pela expedição</div><div>Cooperado ou portador · ${esc(exp.retirado_por) || ''}</div></div>
     <p style="font-size:11px;margin-top:20px">Emitido em ${new Date().toLocaleString('pt-BR')}.</p>`;
   imprimir();
 }
@@ -927,7 +928,7 @@ async function telaSie() {
       <div class="scroll"><table>${cabOc}${linhasOc || '<tr><td colspan="11" class="mut">Nenhuma condenação detalhada no mês.</td></tr>'}</table></div></div>`;
   $('#sMes').onchange = e => { st.sieMes = e.target.value; render(); };
   $('#bMapa').onclick = () => { $('#rel').innerHTML = `
-    <div style="display:flex;gap:16px;align-items:center"><img src="logo.svg" alt="Fort Aves" style="height:44px"><div class="cab"><b>${esc((E.razao_social || '').toUpperCase())}${E.sigla ? ' - ' + esc(E.sigla) : ''}</b><br>
+    <div style="display:flex;gap:16px;align-items:center"><img src="logo-copaf.jpg" alt="COPAF" style="height:80px"><div class="cab"><b>${esc((E.razao_social || '').toUpperCase())}${E.sigla ? ' - ' + esc(E.sigla) : ''}</b><br>
       CNPJ: ${esc(E.cnpj)}, INSCRIÇÃO ESTADUAL: ${esc(E.inscricao_estadual)}; Nº REGISTRO NO CRMV: ${esc(E.registro_crmv)}<br>
       ABATEDOURO DE AVES - REGISTRO NO SIE Nº ${esc(E.registro_sie)}<br>ENDEREÇO: ${esc((E.endereco || '').toUpperCase())}</div></div>
     <h3>MAPA DE ABATE - ${MESES[m - 1]}/${a}</h3>
@@ -956,14 +957,13 @@ async function telaEtiquetas() {
       <label>Porção (g) <input name="porcao_g" type="number" step="0.01" value="${m.porcao_g ?? ''}"></label>
       <label>Medida caseira da porção <input name="porcao_desc" value="${esc(m.porcao_desc)}" placeholder="1 Fração"></label>
       <label>Validade resfriado (dias) <input name="validade_resfriado_dias" type="number" step="1" min="1" value="${m.validade_resfriado_dias ?? ''}"></label>
-      <label>Validade congelado (dias) <input name="validade_congelado_dias" type="number" step="1" min="1" value="${m.validade_congelado_dias ?? ''}"></label>
-      <label>Código de barras padrão (EAN-13) <input name="ean" value="${esc(m.ean)}" inputmode="numeric" maxlength="13"></label></div>
+      <label>Validade congelado (dias) <input name="validade_congelado_dias" type="number" step="1" min="1" value="${m.validade_congelado_dias ?? ''}"></label></div>
     <h2 style="margin-top:16px">Informação nutricional</h2>
     <div class="scroll"><table style="max-width:640px"><tr><th>Item</th><th class="n">Por 100 g</th><th class="n">Por porção</th><th class="n">% VD</th></tr>
       ${NUT.map(([k, r]) => `<tr><td>${r}</td><td class="n"><input name="n_${k}" type="number" step="0.01" min="0" style="width:90px;text-align:right" value="${(n[k] || {}).v100 ?? ''}"></td><td class="n" data-porc="${k}"></td><td class="n"><input name="vd_${k}" type="number" step="0.01" min="0" style="width:80px;text-align:right" value="${(n[k] || {}).vd ?? ''}"></td></tr>`).join('')}</table></div>
     <p class="mut" style="margin:6px 0 0">O valor por porção é calculado (por 100 g × porção). <button type="button" class="lnk" id="bVd">Preencher % VD</button> usa o mesmo critério da etiqueta atual de sobrecoxa (valor por 100 g sobre o valor diário de referência); confira com o responsável técnico.</p>
     <h2 style="margin-top:16px">Código de barras por cooperado</h2>
-    <p class="mut">Preencha só se o cooperado tiver código próprio para este produto; em branco, usa o código padrão acima.</p>
+    <p class="mut">Cada cooperado tem o seu próprio código (EAN-13) para este produto. A etiqueta de um lote sai com o código do cooperado dono do lote; sem código cadastrado, sai sem barras.</p>
     <div class="grid">${ativos('cooperados').map(c => `<label>${esc(c.nome)} <input name="ean_${c.id}" value="${esc(eanCoop(c.id))}" inputmode="numeric" maxlength="13"></label>`).join('')}</div>
     <p style="margin-top:14px"><button class="b">Salvar etiqueta</button></p></form></div>
   <div class="card"><h2>Pré-visualização (105 × 75 mm)</h2><div class="previa-etq" id="pvEtq"></div>
@@ -972,15 +972,15 @@ async function telaEtiquetas() {
   const ler1 = () => { const nut = {}; for (const [k] of NUT) { const v = f.elements['n_' + k].value, d = f.elements['vd_' + k].value; if (v !== '' || d !== '') nut[k] = { v100: v === '' ? null : Number(v), vd: d === '' ? null : Number(d) }; }
     const num1 = k => f.elements[k].value === '' ? null : Number(f.elements[k].value), txt = k => f.elements[k].value.trim() || null;
     return { produto:cod, nome_impresso:f.elements.nome_impresso.value.trim(), peso_liquido:f.elements.peso_liquido.value.trim(), porcoes_emb:txt('porcoes_emb'), porcao_g:num1('porcao_g'), porcao_desc:txt('porcao_desc'),
-      nutrientes:nut, validade_resfriado_dias:num1('validade_resfriado_dias'), validade_congelado_dias:num1('validade_congelado_dias'), ean:txt('ean') }; };
+      nutrientes:nut, validade_resfriado_dias:num1('validade_resfriado_dias'), validade_congelado_dias:num1('validade_congelado_dias'), ean:null }; };
   const previa = () => { const o = ler1(), porc = o.porcao_g;
     for (const [k] of NUT) { const v = f.elements['n_' + k].value; main.querySelector(`[data-porc="${k}"]`).textContent = v === '' || !porc ? '' : nd(Number(v) * porc / 100); }
-    $('#pvEtq').innerHTML = etiquetaHtml({ modelo:o, lote:hoje().replaceAll('-', '') + '-01', fab:hoje(), val:somaDias(hoje(), o.validade_congelado_dias || 365), ean:o.ean || '' }); };
+    $('#pvEtq').innerHTML = etiquetaHtml({ modelo:o, lote:hoje().replaceAll('-', '') + '-01', fab:hoje(), val:somaDias(hoje(), o.validade_congelado_dias || 365), ean:ativos('cooperados').map(c => f.elements['ean_' + c.id].value.trim()).find(eanValido) || '' }); };
   f.oninput = previa; previa();
   $('#eProd').onchange = e => { st.etqProd = e.target.value; render(); };
   $('#bVd').onclick = () => { for (const [k] of NUT) { const v = f.elements['n_' + k].value; if (v !== '' && VDR[k]) f.elements['vd_' + k].value = Math.round(Number(v) * 100 / VDR[k]); else if (v !== '' && Number(v) === 0) f.elements['vd_' + k].value = 0; } previa(); };
   f.onsubmit = async e => { e.preventDefault(); try {
-    const o = ler1(), ruins = [o.ean, ...ativos('cooperados').map(c => f.elements['ean_' + c.id].value.trim())].filter(x => x && !eanValido(x));
+    const o = ler1(), ruins = ativos('cooperados').map(c => f.elements['ean_' + c.id].value.trim()).filter(x => x && !eanValido(x));
     if (ruins.length) return alert(`Código de barras inválido: ${ruins.join(', ')}. O EAN-13 tem 13 dígitos e o último é verificador.`);
     await q(sb.from('etiquetas').upsert(o));
     for (const c of ativos('cooperados')) { const v = f.elements['ean_' + c.id].value.trim();
