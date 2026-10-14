@@ -114,6 +114,7 @@
     <button data-tab="cam">Câmara fria</button>
     <button data-tab="sie">Relatórios SIE</button>
     <button data-tab="emb">Embalagens</button>
+    <button data-tab="desp">Despesas</button>
     <button data-tab="cad">Cadastros</button>
     <button data-tab="usu" id="nvUsu" hidden>Usuários</button>
   </nav>
@@ -318,7 +319,7 @@ async function telaDia() {
   const embSaldos = lotes.length ? await q(sb.from('v_embalagem_saldo').select('*').in('cooperado_id', [...new Set(lotes.map(l => l.cooperado_id))]).order('nome')) : [];
   // dia fechado: vale o custo gravado no fechamento, não o recalculado
   if (dia && dia.fechado && dia.f_total != null) cd = { ...cd, custo_diaristas:dia.f_diaristas, custo_energia:dia.f_energia, custo_agua:dia.f_agua,
-    custo_limpeza:dia.f_limpeza, custo_outros:dia.f_outros, parcela_custos_mensais:dia.f_mensal, custo_total:dia.f_total, cabecas_dia:dia.f_cabecas };
+    custo_limpeza:dia.f_limpeza, custo_outros:dia.f_outros, parcela_custos_mensais:dia.f_mensal, custo_despesas:dia.f_despesas ?? 0, custo_total:dia.f_total, cabecas_dia:dia.f_cabecas };
   const topo = `<div class="card row"><label>Data <input type="date" id="dData" value="${d}"></label>
     ${dia ? `<span class="tag ${dia.fechado ? 'ok' : ''}">${dia.fechado ? 'Dia fechado' : 'Dia em aberto'}</span>
       <button class="b ${dia.fechado ? 'warn' : ''}" id="bFechar">${dia.fechado ? 'Reabrir dia' : 'Fechar dia'}</button>` : ''}</div>`;
@@ -355,6 +356,7 @@ async function telaDia() {
     <div class="kpi"><small>Limpeza</small><b>${brl(cd.custo_limpeza)}</b></div>
     <div class="kpi"><small>Outros</small><b>${brl(cd.custo_outros)}</b></div>
     <div class="kpi"><small>Diária dos custos mensais</small><b>${semMensal ? 'não informada' : brl(cd.parcela_custos_mensais)}</b></div>
+    <div class="kpi"><small>Despesas do mês anterior${cd.cabecas_dia && Number(cd.custo_despesas) ? ' (' + num(cd.custo_despesas / cd.cabecas_dia, 4) + '/cabeça)' : ''}</small><b>${brl(cd.custo_despesas)}</b></div>
     <div class="kpi"><small>Cabeças pagantes</small><b>${num(cd.cabecas_dia)}</b></div>
     <div class="kpi big"><small>Custo total do dia</small><b>${brl(cd.custo_total)}</b></div>
     <div class="kpi big"><small>Custo por cabeça</small><b>${porCab == null ? '—' : num(porCab, 4)}</b></div>
@@ -669,7 +671,7 @@ function relatorio(l, cd, lotes, custoLote, planos, fechado, pesagens, embalagen
     <p>Cabeças abatidas no dia: ${num(cd.cabecas_dia)} em ${lotes.length} lote(s). Participação deste lote: ${num(part * 100, 2)}%.</p>
     <table><tr><th>Item</th><th class="n">Custo do dia</th><th class="n">Parcela do lote</th></tr>
       ${linha('Mão de obra (diaristas)', cd.custo_diaristas)}${linha('Energia elétrica', cd.custo_energia)}${linha('Água', cd.custo_agua)}
-      ${linha('Limpeza', cd.custo_limpeza)}${linha('Outros custos do dia', cd.custo_outros)}${semMensal ? '<tr><td>Custos fixos mensais (equipe fixa, manutenção, materiais)</td><td class="n" colspan="2">não incluídos</td></tr>' : linha('Custos fixos mensais (equipe fixa, manutenção, materiais)', cd.parcela_custos_mensais)}
+      ${linha('Limpeza', cd.custo_limpeza)}${linha('Outros custos do dia', cd.custo_outros)}${Number(cd.custo_despesas) ? linha('Despesas gerais do mês anterior (rateio por cabeça)', cd.custo_despesas) : ''}${semMensal ? '<tr><td>Custos fixos mensais (equipe fixa, manutenção, materiais)</td><td class="n" colspan="2">não incluídos</td></tr>' : linha('Custos fixos mensais (equipe fixa, manutenção, materiais)', cd.parcela_custos_mensais)}
       <tr class="tot"><td>Total</td><td class="n">${brl(cd.custo_total)}</td><td class="n">${brl(custoLote(l.id))}</td></tr></table>
     ${semMensal ? '<p class="relaviso"><b>Atenção:</b> este custo não inclui os componentes de despesas fixas mensais do abatedouro (equipe fixa, manutenção e materiais de limpeza), que ainda não foram apurados para o mês. O valor abaixo corresponde somente aos custos do dia do abate.</p>' : ''}
     <h2>${semMensal ? 'Valor parcial (custos do dia)' : 'Valor a pagar'}</h2>
@@ -695,6 +697,11 @@ async function telaMes() {
     q(sb.from('v_complemento_mes').select('*').eq('competencia', comp).maybeSingle()),
     q(sb.from('v_complemento_cooperado').select('*').eq('competencia', comp)),
     q(sb.from('v_custo_dia').select('data,cabecas_dia,custo_total,custo_energia,custo_agua').eq('competencia', comp).order('data'))]);
+  const [aM, mM] = st.mes.split('-').map(Number), prox = `${mM === 12 ? aM + 1 : aM}-${String(mM === 12 ? 1 : mM + 1).padStart(2, '0')}-01`;
+  const despMes = await q(sb.from('despesas').select('valor, despesa_categorias(rateia)').gte('data', comp).lt('data', prox));
+  const cProx = await q(sb.from('competencias').select('taxa_despesas,despesas_base,cabecas_base').eq('competencia', prox).maybeSingle());
+  const despRat = despMes.filter(x => x.despesa_categorias && x.despesa_categorias.rateia).reduce((a, x) => a + Number(x.valor), 0), despTot = despMes.reduce((a, x) => a + Number(x.valor), 0);
+  const cabMes = dias.reduce((a, x) => a + Number(x.cabecas_dia), 0);
   const fixos = ativos('funcionarios').filter(x => x.vinculo === 'fixo');
   const totFixos = fixos.reduce((s, x) => s + Number(x.salario_mensal ?? 0), 0), totOutros = cm.reduce((s, x) => s + Number(x.valor_previsto), 0);
   const divisor = c.dias_abate_previstos || 15, total = totFixos + totOutros, diaria = total / divisor;
@@ -722,6 +729,18 @@ async function telaMes() {
       <label>Descrição <input name="descricao"></label>
       <label>Valor mensal (R$) <input name="valor_previsto" type="number" step="0.01" required></label>
       <button class="b sec">Adicionar custo</button></form></div>
+  <div class="card"><h2>Despesas do mês e valor por cabeça para o mês seguinte</h2>
+    <p class="mut">Regra: ao fechar o mês, o total das despesas rateáveis (menu Despesas) é dividido pelas cabeças abatidas no mês. O resultado é um valor por cabeça que entra no custo de cada dia de produção do mês seguinte, <b>somado</b> aos custos do dia e à diária dos custos mensais.</p>
+    <div class="kpis" style="margin-bottom:12px">
+      <div class="kpi"><small>Aplicado neste mês (vem do mês anterior)</small><b>${c.taxa_despesas == null ? 'nenhum' : 'R$ ' + num(c.taxa_despesas, 4) + ' / cabeça'}</b></div>
+      <div class="kpi"><small>Despesas rateáveis deste mês</small><b>${brl(despRat)}</b></div>
+      <div class="kpi"><small>Despesas fora do rateio</small><b>${brl(despTot - despRat)}</b></div>
+      <div class="kpi"><small>Cabeças abatidas no mês</small><b>${num(cabMes)}</b></div>
+      <div class="kpi big"><small>${c.fechada ? 'Valor gravado para o mês seguinte' : 'Prévia para o mês seguinte'}</small><b>${c.fechada && cProx && cProx.taxa_despesas != null ? 'R$ ' + num(cProx.taxa_despesas, 4) + ' / cabeça' : cabMes ? 'R$ ' + num(despRat / cabMes, 4) + ' / cabeça' : '—'}</b></div></div>
+    <p><span class="tag ${c.fechada ? 'ok' : ''}">${c.fechada ? 'Mês fechado' : 'Mês em aberto'}</span>
+      ${c.fechada ? '<button class="b warn" id="bReabrirMes">Reabrir mês</button>' : '<button class="b" id="bFecharMes">Fechar mês e gerar o valor por cabeça</button>'}
+      <button class="lnk" id="bIrDesp">Ver despesas do mês</button></p>
+    <p class="mut">Feche o mês depois de lançar todas as despesas e todos os abates dele. Mês fechado não aceita mais lançar, alterar ou excluir despesa. Só o administrador reabre.</p></div>
   <div class="card"><h2>Contas reais de energia e água (fim do mês)</h2>
     <p class="mut">Lance quando as contas chegarem. A diferença para o que já foi cobrado nos dias de abate vira o complemento mensal abaixo.</p>
     <form id="fMes"><div class="grid">${campos(F_MES, c)}</div><p><button class="b">Salvar contas</button></p></form></div>
@@ -750,6 +769,10 @@ async function telaMes() {
       if (t.dataset.del) { if (confirm('Excluir este custo mensal?')) { await q(sb.from('custos_mensais').delete().eq('id', t.dataset.del)); render(); } }
       if (t.id === 'bIrEquipe') { st.cad = 'funcionarios'; st.tab = 'cad'; render(); }
       if (t.dataset.dia) { st.data = t.dataset.dia; st.tab = 'dia'; render(); }
+      if (t.id === 'bIrDesp') { st.despMes = st.mes; st.tab = 'desp'; render(); }
+      if (t.id === 'bFecharMes') { if (!confirm(`Fechar ${st.mes.split('-').reverse().join('/')}?\n\nDespesas rateáveis: ${brl(despRat)}\nCabeças abatidas: ${num(cabMes)}\n\nO valor por cabeça será cobrado nos dias de produção do mês seguinte, e as despesas deste mês ficam travadas.`)) return;
+        const tx = await q(sb.rpc('fechar_mes', { p_comp:comp })); alert(`Mês fechado. Valor por cabeça para o mês seguinte: R$ ${num(tx, 4)}.`); render(); }
+      if (t.id === 'bReabrirMes') { if (!confirm('Reabrir o mês? O valor por cabeça gravado para o mês seguinte será apagado até o mês ser fechado de novo.')) return; await q(sb.rpc('reabrir_mes', { p_comp:comp })); render(); }
     } catch (er) { falha(er); }
   };
 }
@@ -843,6 +866,115 @@ async function telaCam() {
       if (t.id === 'bLimparRet') { st.cart = []; render(); }
       if (t.dataset.rom) { const ex = exps.find(x => x.id === Number(t.dataset.rom)); romaneio(ex, itens.filter(i => i.expedicao_id === ex.id), lotesExp); }
       if (t.dataset.delexp) { if (!confirm(`Excluir a retirada nº ${t.dataset.delexp}? Os produtos voltam para o saldo da câmara fria.`)) return; await q(sb.from('expedicoes').delete().eq('id', t.dataset.delexp)); render(); }
+    } catch (er) { falha(er); } };
+}
+
+// ───────── DESPESAS E CAIXA INTERNO ─────────
+const FORMAS = ['Dinheiro', 'Pix', 'Cartão de débito', 'Cartão de crédito', 'Boleto', 'Transferência'];
+// reduz a foto antes de enviar, para economizar espaço de armazenamento
+async function prepararComprovante(file) {
+  if (!file.type.startsWith('image/')) { if (file.size > 5 * 1024 * 1024) throw new Error('Arquivo muito grande (máximo de 5 MB).'); return { blob:file, ext:(file.name.split('.').pop() || 'pdf').toLowerCase() }; }
+  const img = await createImageBitmap(file), k = Math.min(1, 1600 / Math.max(img.width, img.height)), c = document.createElement('canvas');
+  c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  return { blob: await new Promise(r => c.toBlob(r, 'image/jpeg', 0.72)), ext:'jpg' };
+}
+async function telaDesp() {
+  const mes = st.despMes = st.despMes || hoje().slice(0, 7), ini = mes + '-01', [a, m] = mes.split('-').map(Number), fim = `${m === 12 ? a + 1 : a}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01`;
+  const [cats, desp, comp, cxMov, cxDesp] = await Promise.all([
+    q(sb.from('despesa_categorias').select('*').order('nome')),
+    q(sb.from('despesas').select('*').gte('data', ini).lt('data', fim).order('data', { ascending:false }).order('id', { ascending:false })),
+    q(sb.from('competencias').select('fechada').eq('competencia', ini).maybeSingle()),
+    q(sb.from('caixa_movimentos').select('*').order('data', { ascending:false }).order('id', { ascending:false })),
+    q(sb.from('despesas').select('data,valor').eq('fonte', 'caixa'))]);
+  const fechado = !!(comp && comp.fechada), cat = id => cats.find(c => c.id === id) || {}, soma = (l, fn = x => x.valor) => l.reduce((s, x) => s + Number(fn(x)), 0);
+  const sinal = x => x.tipo === 'aporte' ? Number(x.valor) : -Number(x.valor);
+  const saldo = soma(cxMov, sinal) - soma(cxDesp), saldoIni = soma(cxMov.filter(x => x.data < ini), sinal) - soma(cxDesp.filter(x => x.data < ini));
+  const movMes = cxMov.filter(x => x.data >= ini && x.data < fim), entradasMes = soma(movMes.filter(x => x.tipo === 'aporte')), devolMes = soma(movMes.filter(x => x.tipo === 'devolucao'));
+  const total = soma(desp), doCaixa = soma(desp.filter(x => x.fonte === 'caixa')), rateavel = soma(desp.filter(x => cat(x.categoria_id).rateia));
+  const porCat = cats.map(c => ({ c, v:soma(desp.filter(x => x.categoria_id === c.id)), n:desp.filter(x => x.categoria_id === c.id).length })).filter(x => x.n).sort((x, y) => y.v - x.v);
+  const tabCat = `<table><tr><th>Categoria</th><th class="n">Lançamentos</th><th class="n">Total</th><th class="n">% do mês</th><th>Rateio</th></tr>
+    ${porCat.map(x => `<tr><td>${esc(x.c.nome)}</td><td class="n">${x.n}</td><td class="n">${brl(x.v)}</td><td class="n">${total ? num(100 * x.v / total, 1) : 0}%</td><td>${x.c.rateia ? 'entra no rateio' : 'fora do rateio'}</td></tr>`).join('') || '<tr><td colspan="5" class="mut">Nenhuma despesa no mês.</td></tr>'}
+    <tr class="tot"><td><b>Total</b></td><td class="n"><b>${desp.length}</b></td><td class="n"><b>${brl(total)}</b></td><td></td><td><b>${brl(rateavel)} no rateio</b></td></tr></table>`;
+  main.innerHTML = `<div class="card row"><label>Mês <input type="month" id="dMes" value="${mes}"></label><span class="tag ${fechado ? 'ok' : ''}">${fechado ? 'Mês fechado' : 'Mês em aberto'}</span>
+      <button class="b sec" id="bRelDesp" ${desp.length || movMes.length ? '' : 'disabled'}>Imprimir relatório do mês</button></div>
+    <div class="card"><div class="kpis">
+      <div class="kpi"><small>Despesas do mês</small><b>${brl(total)}</b></div>
+      <div class="kpi"><small>Pagas pelo caixa interno</small><b>${brl(doCaixa)}</b></div>
+      <div class="kpi"><small>Pagas por outra fonte</small><b>${brl(total - doCaixa)}</b></div>
+      <div class="kpi"><small>Entram no rateio do mês seguinte</small><b>${brl(rateavel)}</b></div>
+      <div class="kpi big"><small>Saldo atual do caixa interno</small><b>${brl(saldo)}</b></div></div></div>
+    <div class="card"><h2>Nova despesa</h2>
+      ${fechado ? '<p class="mut">Este mês está fechado e não aceita novos lançamentos.</p>' : `<form id="fDesp"><div class="grid">
+        <label>Data <input name="data" type="date" required value="${hoje() >= ini && hoje() < fim ? hoje() : ini}" min="${ini}" max="${somaDias(fim, -1)}"></label>
+        <label>Categoria <select name="categoria_id" required><option value=""></option>${cats.filter(c => c.ativo).map(c => `<option value="${c.id}">${esc(c.nome)}</option>`).join('')}</select></label>
+        <label>Descrição <input name="descricao" required placeholder="o que foi comprado ou pago"></label>
+        <label>Fornecedor <input name="fornecedor"></label>
+        <label>Valor (R$) <input name="valor" type="number" step="0.01" min="0.01" required></label>
+        <label>Pago com <select name="fonte" required><option value="caixa">Caixa interno</option><option value="outra">Outra fonte</option></select></label>
+        <label>Forma de pagamento <select name="forma_pagamento"><option value=""></option>${FORMAS.map(x => `<option>${x}</option>`).join('')}</select></label>
+        <label>Nº da nota ou recibo <input name="documento"></label>
+        <label>Foto da nota ou recibo <input name="arquivo" type="file" accept="image/*,application/pdf"></label></div>
+        <p><button class="b">Lançar despesa</button> <span class="mut" id="dMsg"></span></p></form>
+        <p class="mut" style="margin:0">Atenção: não lance aqui o que já é cobrado por outro caminho (diaristas, limpeza e outros custos lançados no Dia de produção, mensalistas, contas de energia e água). Se precisar registrar algo assim só para controle, use uma categoria marcada como "fora do rateio".</p>`}</div>
+    <div class="card"><h2>Despesas de ${MESES[m - 1].toLowerCase()} de ${a}</h2><div class="scroll"><table>
+      <tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Fornecedor</th><th class="n">Valor</th><th>Pago com</th><th>Forma</th><th>Nota</th><th></th></tr>
+      ${desp.map(x => `<tr><td>${dataBR(x.data)}</td><td>${esc(cat(x.categoria_id).nome)}</td><td style="white-space:normal">${esc(x.descricao)}</td><td>${esc(x.fornecedor)}</td><td class="n"><b>${brl(x.valor)}</b></td>
+        <td><span class="tag ${x.fonte === 'caixa' ? 'az' : ''}">${x.fonte === 'caixa' ? 'Caixa interno' : 'Outra fonte'}</span></td><td>${esc(x.forma_pagamento)}</td><td>${esc(x.documento)}</td>
+        <td>${x.comprovante_path ? `<button class="lnk" data-ver="${x.id}">comprovante</button>` : ''}${fechado ? '' : `<button class="lnk" data-deldesp="${x.id}">excluir</button>`}</td></tr>`).join('') || '<tr><td colspan="9" class="mut">Nenhuma despesa lançada neste mês.</td></tr>'}
+      </table></div></div>
+    <div class="card"><h2>Resumo por categoria</h2><div class="scroll">${tabCat}</div></div>
+    <div class="card"><h2>Caixa interno</h2>
+      <p class="mut">O caixa recebe aportes para as despesas do dia a dia. Toda despesa marcada como paga pelo "Caixa interno" sai deste saldo automaticamente.</p>
+      <div class="kpis" style="margin-bottom:12px"><div class="kpi"><small>Saldo no início do mês</small><b>${brl(saldoIni)}</b></div><div class="kpi"><small>Aportes no mês</small><b>${brl(entradasMes)}</b></div>
+        <div class="kpi"><small>Despesas pagas pelo caixa no mês</small><b>${brl(doCaixa)}</b></div><div class="kpi"><small>Devoluções no mês</small><b>${brl(devolMes)}</b></div>
+        <div class="kpi big"><small>Saldo no fim do mês</small><b>${brl(saldoIni + entradasMes - devolMes - doCaixa)}</b></div></div>
+      <form id="fCx" class="row"><label>Data <input name="data" type="date" required value="${hoje()}"></label>
+        <label>Tipo <select name="tipo"><option value="aporte">Aporte (entrada de dinheiro)</option><option value="devolucao">Devolução (saída sem ser despesa)</option></select></label>
+        <label>Valor (R$) <input name="valor" type="number" step="0.01" min="0.01" required></label><label>Observação <input name="descricao" placeholder="quem aportou, motivo"></label>
+        <button class="b sec">Registrar no caixa</button></form>
+      <div class="scroll" style="margin-top:12px"><table><tr><th>Data</th><th>Tipo</th><th class="n">Valor</th><th>Observação</th><th>Lançado por</th><th></th></tr>
+      ${movMes.map(x => `<tr><td>${dataBR(x.data)}</td><td><span class="tag ${x.tipo === 'aporte' ? 'ok' : ''}">${x.tipo === 'aporte' ? 'Aporte' : 'Devolução'}</span></td><td class="n">${brl(x.valor)}</td><td>${esc(x.descricao)}</td><td>${esc((x.criado_por || '').split('@')[0])}</td>
+        <td><button class="lnk" data-delcx="${x.id}">excluir</button></td></tr>`).join('') || '<tr><td colspan="6" class="mut">Nenhum aporte ou devolução neste mês.</td></tr>'}</table></div></div>
+    <div class="card"><details><summary style="cursor:pointer"><b>Categorias de despesa</b></summary>
+      <p class="mut">"Entra no rateio" significa que a despesa compõe o valor por cabeça cobrado no mês seguinte. Desmarque para o que é só controle ou já é cobrado por outro caminho.</p>
+      <div class="scroll"><table><tr><th>Categoria</th><th>Entra no rateio do mês seguinte</th><th>Situação</th><th></th></tr>
+      ${cats.map(c => `<tr style="${c.ativo ? '' : 'opacity:.55'}"><td>${esc(c.nome)}</td><td><label style="flex-direction:row;align-items:center;gap:6px;color:var(--ink);font-size:13px"><input type="checkbox" data-rateia="${c.id}" ${c.rateia ? 'checked' : ''}> ${c.rateia ? 'sim' : 'não'}</label></td>
+        <td>${c.ativo ? 'ativa' : 'inativa'}</td><td><button class="lnk" data-catativo="${c.id}:${!c.ativo}">${c.ativo ? 'inativar' : 'reativar'}</button></td></tr>`).join('')}</table></div>
+      <form id="fCat" class="row" style="margin-top:10px"><label>Nova categoria <input name="nome" required></label><button class="b sec">Adicionar</button></form></details></div>`;
+
+  $('#dMes').onchange = e => { st.despMes = e.target.value; render(); };
+  const fD = $('#fDesp');
+  if (fD) fD.onsubmit = async e => { e.preventDefault(); const msg = $('#dMsg'); try {
+    const arq = fD.elements.arquivo.files[0]; let caminho = null;
+    if (arq) { msg.textContent = 'Enviando o comprovante...'; const p = await prepararComprovante(arq);
+      caminho = `${fD.elements.data.value.slice(0, 7)}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${p.ext}`;
+      const up = await sb.storage.from('comprovantes').upload(caminho, p.blob, { contentType: p.ext === 'jpg' ? 'image/jpeg' : arq.type || 'application/octet-stream' });
+      if (up.error) throw new Error('Não foi possível enviar o comprovante: ' + up.error.message); }
+    await q(sb.from('despesas').insert({ data:fD.elements.data.value, categoria_id:Number(fD.elements.categoria_id.value), descricao:fD.elements.descricao.value.trim(), fornecedor:fD.elements.fornecedor.value.trim() || null,
+      valor:Number(fD.elements.valor.value), fonte:fD.elements.fonte.value, forma_pagamento:fD.elements.forma_pagamento.value || null, documento:fD.elements.documento.value.trim() || null, comprovante_path:caminho }));
+    render(); } catch (er) { msg.textContent = ''; falha(er); } };
+  $('#fCx').onsubmit = async e => { e.preventDefault(); const f = e.target; try {
+    await q(sb.from('caixa_movimentos').insert({ data:f.elements.data.value, tipo:f.elements.tipo.value, valor:Number(f.elements.valor.value), descricao:f.elements.descricao.value.trim() || null })); render(); } catch (er) { falha(er); } };
+  $('#fCat').onsubmit = async e => { e.preventDefault(); try { await q(sb.from('despesa_categorias').insert({ nome:e.target.elements.nome.value.trim() })); render(); } catch (er) { falha(/duplicate|unique/i.test(er.message) ? new Error('Já existe uma categoria com esse nome.') : er); } };
+  main.onchange = async e => { const t = e.target; if (!t.dataset.rateia) return; try { await q(sb.from('despesa_categorias').update({ rateia:t.checked }).eq('id', t.dataset.rateia)); render(); } catch (er) { falha(er); } };
+  main.onclick = async e => { const t = e.target;
+    try {
+      if (t.dataset.ver) { const x = desp.find(y => y.id === Number(t.dataset.ver)), r = await sb.storage.from('comprovantes').createSignedUrl(x.comprovante_path, 300); if (r.error) throw new Error(r.error.message); window.open(r.data.signedUrl, '_blank'); }
+      if (t.dataset.deldesp) { const x = desp.find(y => y.id === Number(t.dataset.deldesp)); if (!confirm(`Excluir a despesa "${x.descricao}" de ${brl(x.valor)}?`)) return;
+        await q(sb.from('despesas').delete().eq('id', x.id)); if (x.comprovante_path) await sb.storage.from('comprovantes').remove([x.comprovante_path]); render(); }
+      if (t.dataset.delcx) { if (!confirm('Excluir este lançamento do caixa?')) return; await q(sb.from('caixa_movimentos').delete().eq('id', t.dataset.delcx)); render(); }
+      if (t.dataset.catativo) { const [id, v] = t.dataset.catativo.split(':'); await q(sb.from('despesa_categorias').update({ ativo: v === 'true' }).eq('id', id)); render(); }
+      if (t.id === 'bRelDesp') { $('#rel').innerHTML = `
+        <div style="display:flex;gap:16px;align-items:center"><img src="logo-copaf.jpg" alt="COPAF" style="height:70px"><div><b style="font-size:15px">Relatório de despesas</b><br>${MESES[m - 1]} de ${a} · Abatedouro</div></div>
+        <h2>Resumo</h2><table><tr><td>Total de despesas do mês</td><td class="n"><b>${brl(total)}</b></td><td>Pagas pelo caixa interno</td><td class="n">${brl(doCaixa)}</td></tr>
+          <tr><td>Entram no rateio do mês seguinte</td><td class="n"><b>${brl(rateavel)}</b></td><td>Pagas por outra fonte</td><td class="n">${brl(total - doCaixa)}</td></tr></table>
+        <h2>Despesas por categoria</h2>${tabCat}
+        <h2>Caixa interno</h2><table><tr><td>Saldo no início do mês</td><td class="n">${brl(saldoIni)}</td></tr><tr><td>(+) Aportes</td><td class="n">${brl(entradasMes)}</td></tr><tr><td>(−) Despesas pagas pelo caixa</td><td class="n">${brl(doCaixa)}</td></tr>
+          <tr><td>(−) Devoluções</td><td class="n">${brl(devolMes)}</td></tr><tr class="tot"><td>Saldo no fim do mês</td><td class="n">${brl(saldoIni + entradasMes - devolMes - doCaixa)}</td></tr></table>
+        <h2>Lançamentos</h2><table><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Fornecedor</th><th>Pago com</th><th>Nota</th><th class="n">Valor</th></tr>
+          ${[...desp].reverse().map(x => `<tr><td>${dataBR(x.data)}</td><td>${esc(cat(x.categoria_id).nome)}</td><td style="white-space:normal">${esc(x.descricao)}</td><td>${esc(x.fornecedor)}</td><td>${x.fonte === 'caixa' ? 'Caixa' : 'Outra fonte'}${x.forma_pagamento ? ' · ' + esc(x.forma_pagamento) : ''}</td><td>${esc(x.documento)}</td><td class="n">${brl(x.valor)}</td></tr>`).join('')}
+          <tr class="tot"><td colspan="6">Total</td><td class="n">${brl(total)}</td></tr></table>
+        <p style="font-size:11px;margin-top:16px">Emitido em ${new Date().toLocaleString('pt-BR')}.</p>`; imprimir(); }
     } catch (er) { falha(er); } };
 }
 
@@ -1085,7 +1217,7 @@ async function telaUsuarios() {
 async function render() {
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === st.tab));
   main.onclick = null; main.onchange = null;
-  try { await ({ dia:telaDia, mes:telaMes, cam:telaCam, sie:telaSie, emb:telaEmb, cad:telaCad, usu:telaUsuarios })[st.tab](); }
+  try { await ({ dia:telaDia, mes:telaMes, cam:telaCam, sie:telaSie, emb:telaEmb, desp:telaDesp, cad:telaCad, usu:telaUsuarios })[st.tab](); }
   catch (e) { main.innerHTML = `<div class="card"><p class="msg">Erro ao carregar: ${esc(e.message)}</p></div>`; }
 }
 $('#nav').onclick = e => { if (e.target.dataset.tab) { st.tab = e.target.dataset.tab; render(); } };
