@@ -319,7 +319,10 @@ async function telaDia() {
   const embSaldos = lotes.length ? await q(sb.from('v_embalagem_saldo').select('*').in('cooperado_id', [...new Set(lotes.map(l => l.cooperado_id))]).order('nome')) : [];
   // dia fechado: vale o custo gravado no fechamento, não o recalculado
   if (dia && dia.fechado && dia.f_total != null) cd = { ...cd, custo_diaristas:dia.f_diaristas, custo_energia:dia.f_energia, custo_agua:dia.f_agua,
-    custo_limpeza:dia.f_limpeza, custo_outros:dia.f_outros, parcela_custos_mensais:dia.f_mensal, custo_despesas:dia.f_despesas ?? 0, custo_total:dia.f_total, cabecas_dia:dia.f_cabecas };
+    custo_limpeza:dia.f_limpeza, custo_outros:dia.f_outros, custo_total:dia.f_total, cabecas_dia:dia.f_cabecas,
+    custo_direto:['f_diaristas', 'f_energia', 'f_agua', 'f_limpeza', 'f_outros'].reduce((a, k) => a + Number(dia[k] || 0), 0),
+    custo_estrutura: dia.f_estrutura != null ? dia.f_estrutura : Number(dia.f_mensal || 0) + Number(dia.f_despesas || 0) };
+  if (dia && dia.fechado && dia.f_total != null) cd.taxa_estrutura = Number(cd.cabecas_dia) ? cd.custo_estrutura / cd.cabecas_dia : null;
   const topo = `<div class="card row"><label>Data <input type="date" id="dData" value="${d}"></label>
     ${dia ? `<span class="tag ${dia.fechado ? 'ok' : ''}">${dia.fechado ? 'Dia fechado' : 'Dia em aberto'}</span>
       <button class="b ${dia.fechado ? 'warn' : ''}" id="bFechar">${dia.fechado ? 'Reabrir dia' : 'Fechar dia'}</button>` : ''}</div>`;
@@ -331,7 +334,7 @@ async function telaDia() {
   }
   const diaristasCad = ativos('funcionarios').filter(f => f.vinculo === 'diarista');
   const acharDiarista = nome => diaristasCad.find(f => f.nome.trim().toLowerCase() === nome.trim().toLowerCase());
-  const fx = dia.fechado, porCab = cd.cabecas_dia ? cd.custo_total / cd.cabecas_dia : null, semMensal = !Number(cd.parcela_custos_mensais);
+  const fx = dia.fechado, porCab = cd.cabecas_dia ? cd.custo_total / cd.cabecas_dia : null, semTaxa = !(Number(cd.taxa_estrutura) > 0) && !Number(cd.custo_estrutura);
   const custoLote = id => { const l = lotes.find(x => x.id === id); return l && l.custo_fechado != null ? l.custo_fechado : (cl.find(x => x.lote_id === id) || {}).custo_lote; };
   const planosDe = id => planos.filter(p => p.lote_id === id);
   const noPlano = id => planosDe(id).reduce((a, p) => a + p.aves, 0);
@@ -348,15 +351,15 @@ async function telaDia() {
   const condsDe = id => conds.filter(c => c.lote_id === id);
   const lc = lotes.find(l => l.id === st.condLote);
   main.innerHTML = topo + `
-  ${semMensal ? `<div class="card aviso">Os custos mensais (mensalistas e demais custos) ainda não foram informados. O custo abaixo traz <b>somente os custos do dia</b> (diaristas, energia, água, limpeza e outros). <button class="lnk" id="bIrMes">Informar custos mensais</button></div>` : ''}
+  ${semTaxa ? `<div class="card aviso">A taxa de estrutura deste mês ainda não foi informada. O custo abaixo traz <b>somente o custo direto do dia</b> (diaristas, energia, água, limpeza e outros), sem equipe fixa e despesas gerais. <button class="lnk" id="bIrMes">Informar a taxa de estrutura</button></div>` : ''}
   <div class="card"><h2>Custo do dia</h2><div class="kpis">
     <div class="kpi"><small>Diaristas</small><b>${brl(cd.custo_diaristas)}</b></div>
     <div class="kpi"><small>Energia</small><b>${brl(cd.custo_energia)}</b></div>
     <div class="kpi"><small>Água</small><b>${brl(cd.custo_agua)}</b></div>
     <div class="kpi"><small>Limpeza</small><b>${brl(cd.custo_limpeza)}</b></div>
     <div class="kpi"><small>Outros</small><b>${brl(cd.custo_outros)}</b></div>
-    <div class="kpi"><small>Diária dos custos mensais</small><b>${semMensal ? 'não informada' : brl(cd.parcela_custos_mensais)}</b></div>
-    <div class="kpi"><small>Despesas do mês anterior${cd.cabecas_dia && Number(cd.custo_despesas) ? ' (' + num(cd.custo_despesas / cd.cabecas_dia, 4) + '/cabeça)' : ''}</small><b>${brl(cd.custo_despesas)}</b></div>
+    <div class="kpi"><small>Custo direto do dia</small><b>${brl(cd.custo_direto)}</b></div>
+    <div class="kpi"><small>Taxa de estrutura${semTaxa ? '' : ' (R$ ' + num(cd.taxa_estrutura, 4) + ' / cabeça)'}</small><b>${semTaxa ? 'não informada' : brl(cd.custo_estrutura)}</b></div>
     <div class="kpi"><small>Cabeças pagantes</small><b>${num(cd.cabecas_dia)}</b></div>
     <div class="kpi big"><small>Custo total do dia</small><b>${brl(cd.custo_total)}</b></div>
     <div class="kpi big"><small>Custo por cabeça</small><b>${porCab == null ? '—' : num(porCab, 4)}</b></div>
@@ -645,7 +648,7 @@ async function abrirDia() {
 
 // ───────── RELATÓRIO DO LOTE (impressão / PDF) ─────────
 function relatorio(l, cd, lotes, custoLote, planos, fechado, pesagens, embalagens) {
-  const porCab = cd.custo_total / cd.cabecas_dia, part = l.cabecas_pagantes / cd.cabecas_dia, semMensal = !Number(cd.parcela_custos_mensais);
+  const porCab = cd.custo_total / cd.cabecas_dia, part = l.cabecas_pagantes / cd.cabecas_dia, semTaxa = !(Number(cd.taxa_estrutura) > 0) && !Number(cd.custo_estrutura);
   const linha = (nome, v) => `<tr><td>${nome}</td><td class="n">${brl(v)}</td><td class="n">${brl(v * part)}</td></tr>`;
   $('#rel').innerHTML = `
     <img src="logo-copaf.jpg" alt="COPAF" style="height:70px"><p>Abatedouro · Relatório de custo operacional do lote</p>
@@ -671,110 +674,97 @@ function relatorio(l, cd, lotes, custoLote, planos, fechado, pesagens, embalagen
     <p>Cabeças abatidas no dia: ${num(cd.cabecas_dia)} em ${lotes.length} lote(s). Participação deste lote: ${num(part * 100, 2)}%.</p>
     <table><tr><th>Item</th><th class="n">Custo do dia</th><th class="n">Parcela do lote</th></tr>
       ${linha('Mão de obra (diaristas)', cd.custo_diaristas)}${linha('Energia elétrica', cd.custo_energia)}${linha('Água', cd.custo_agua)}
-      ${linha('Limpeza', cd.custo_limpeza)}${linha('Outros custos do dia', cd.custo_outros)}${Number(cd.custo_despesas) ? linha('Despesas gerais do mês anterior (rateio por cabeça)', cd.custo_despesas) : ''}${semMensal ? '<tr><td>Custos fixos mensais (equipe fixa, manutenção, materiais)</td><td class="n" colspan="2">não incluídos</td></tr>' : linha('Custos fixos mensais (equipe fixa, manutenção, materiais)', cd.parcela_custos_mensais)}
+      ${linha('Limpeza', cd.custo_limpeza)}${linha('Outros custos do dia', cd.custo_outros)}
+      <tr><td><b>Custo direto do dia</b></td><td class="n"><b>${brl(cd.custo_direto)}</b></td><td class="n"><b>${brl(cd.custo_direto * part)}</b></td></tr>
+      ${semTaxa ? '<tr><td>Taxa de estrutura (equipe fixa, despesas gerais, energia e água fora dos dias de abate)</td><td class="n" colspan="2">não incluída</td></tr>' : linha(`Taxa de estrutura: R$ ${num(cd.taxa_estrutura, 4)} por cabeça (equipe fixa, despesas gerais, energia e água fora dos dias de abate)`, cd.custo_estrutura)}
       <tr class="tot"><td>Total</td><td class="n">${brl(cd.custo_total)}</td><td class="n">${brl(custoLote(l.id))}</td></tr></table>
-    ${semMensal ? '<p class="relaviso"><b>Atenção:</b> este custo não inclui os componentes de despesas fixas mensais do abatedouro (equipe fixa, manutenção e materiais de limpeza), que ainda não foram apurados para o mês. O valor abaixo corresponde somente aos custos do dia do abate.</p>' : ''}
-    <h2>${semMensal ? 'Valor parcial (custos do dia)' : 'Valor a pagar'}</h2>
+    ${semTaxa ? '<p class="relaviso"><b>Atenção:</b> este custo não inclui a taxa de estrutura do abatedouro (equipe fixa, despesas gerais e energia e água fora dos dias de abate), que ainda não foi definida para o mês. O valor abaixo corresponde somente ao custo direto do dia do abate.</p>' : ''}
+    <h2>${semTaxa ? 'Valor parcial (custo direto do dia)' : 'Valor a pagar'}</h2>
     <p>${num(l.cabecas_pagantes)} cabeças × R$ ${num(porCab, 4)} por cabeça = <b>${brl(custoLote(l.id))}</b></p>
-    <p style="font-size:11px">Energia e água são apuradas no dia pela leitura dos medidores e pela tarifa da última conta. A diferença para a conta real do mês é rateada por cabeça abatida no fechamento mensal e informada em relatório complementar.</p>
+    <p style="font-size:11px">O custo tem duas parcelas. O custo direto é o gasto do próprio dia do abate (mão de obra diarista, energia e água medidas, limpeza), dividido pelas aves abatidas no dia. A taxa de estrutura é um valor por ave igual para todos os lotes do mês; cobre equipe fixa, despesas gerais e energia e água fora dos dias de abate, é calculada no fechamento do mês anterior, e a diferença entre o arrecadado e o gasto real é compensada na taxa do mês seguinte, sem cobrança complementar.</p>
     <p style="font-size:11px">Emitido em ${new Date().toLocaleString('pt-BR')}.</p>`;
   imprimir();
 }
 
 // ───────── FECHAMENTO MENSAL ─────────
-const F_MES_DIAS = [{ k:'dias_abate_previstos', label:'Divisor da diária (padrão 15)', type:'number', step:1, req:true }];
-const F_MES = [
+const F_CONTAS = [
   { k:'energia_conta_kwh', label:'Conta de energia (kWh)', type:'number' }, { k:'energia_conta_valor', label:'Conta de energia (R$)', type:'number' },
   { k:'agua_conta_m3', label:'Conta de água (m³)', type:'number' }, { k:'agua_conta_valor', label:'Conta de água (R$)', type:'number' }];
-const CAT = { salarios_fixos:'Outros custos de pessoal', manutencao:'Manutenção', produtos_limpeza:'Produtos de limpeza', ajuste_mes_anterior:'Ajuste do mês anterior', outros:'Outros' };
 
 async function telaMes() {
-  const comp = st.mes + '-01';
+  const comp = st.mes + '-01', [aM, mM] = st.mes.split('-').map(Number), prox = `${mM === 12 ? aM + 1 : aM}-${String(mM === 12 ? 1 : mM + 1).padStart(2, '0')}-01`;
   await q(sb.from('competencias').upsert({ competencia:comp }, { onConflict:'competencia', ignoreDuplicates:true }));
-  const [c, cm, vm, vc, dias] = await Promise.all([
+  const [c, dias, sit, despMes, cProx] = await Promise.all([
     q(sb.from('competencias').select('*').eq('competencia', comp).single()),
-    q(sb.from('custos_mensais').select('*').eq('competencia', comp).order('id')),
-    q(sb.from('v_complemento_mes').select('*').eq('competencia', comp).maybeSingle()),
-    q(sb.from('v_complemento_cooperado').select('*').eq('competencia', comp)),
-    q(sb.from('v_custo_dia').select('data,cabecas_dia,custo_total,custo_energia,custo_agua').eq('competencia', comp).order('data'))]);
-  const [aM, mM] = st.mes.split('-').map(Number), prox = `${mM === 12 ? aM + 1 : aM}-${String(mM === 12 ? 1 : mM + 1).padStart(2, '0')}-01`;
-  const despMes = await q(sb.from('despesas').select('valor, despesa_categorias(rateia)').gte('data', comp).lt('data', prox));
-  const cProx = await q(sb.from('competencias').select('taxa_despesas,despesas_base,cabecas_base').eq('competencia', prox).maybeSingle());
-  const despRat = despMes.filter(x => x.despesa_categorias && x.despesa_categorias.rateia).reduce((a, x) => a + Number(x.valor), 0), despTot = despMes.reduce((a, x) => a + Number(x.valor), 0);
-  const cabMes = dias.reduce((a, x) => a + Number(x.cabecas_dia), 0);
-  const fixos = ativos('funcionarios').filter(x => x.vinculo === 'fixo');
-  const totFixos = fixos.reduce((s, x) => s + Number(x.salario_mensal ?? 0), 0), totOutros = cm.reduce((s, x) => s + Number(x.valor_previsto), 0);
-  const divisor = c.dias_abate_previstos || 15, total = totFixos + totOutros, diaria = total / divisor;
-  main.innerHTML = `<div class="card row"><label>Mês <input type="month" id="mMes" value="${st.mes}"></label></div>
-  <div class="card"><h2>Custos mensais e diária</h2>
-    <p class="mut">Regra: soma de todos os custos mensais (mensalistas mais os demais custos do mês) dividida por ${divisor}. Essa diária entra no custo de cada dia de produção e é rateada pelas cabeças abatidas no dia.</p>
-    ${total ? '' : '<p class="card aviso" style="margin:0 0 12px">Nenhum custo mensal informado: os dias são apurados só com os custos do dia, e o relatório do lote sai com esse aviso. Cadastre os mensalistas em Cadastros → Equipe, com vínculo "Fixo" e o custo mensal.</p>'}
+    q(sb.from('v_custo_dia').select('*').eq('competencia', comp).order('data')),
+    q(sb.from('dias_producao').select('data,fechado,f_total,f_estrutura,f_cabecas').eq('competencia', comp)),
+    q(sb.from('despesas').select('valor, despesa_categorias(rateia)').gte('data', comp).lt('data', prox)),
+    q(sb.from('competencias').select('taxa_estrutura,alvo_estrutura').eq('competencia', prox).maybeSingle())]);
+  const soma = (l, fn) => l.reduce((x, y) => x + Number(fn(y) || 0), 0), fechadoDia = d => (sit.find(x => x.data === d) || {}).fechado;
+  const fixos = ativos('funcionarios').filter(x => x.vinculo === 'fixo'), abertos = sit.filter(x => !x.fechado).length;
+  // prévia com os valores atuais; depois de fechado, vale o que ficou gravado
+  const mens = c.fechada ? Number(c.est_mensalistas) : soma(fixos, x => x.salario_mensal);
+  const desp = c.fechada ? Number(c.est_despesas) : soma(despMes.filter(x => x.despesa_categorias && x.despesa_categorias.rateia), x => x.valor);
+  const enDias = soma(dias, x => x.custo_energia), agDias = soma(dias, x => x.custo_agua);
+  const eaInformada = c.energia_conta_valor != null || c.agua_conta_valor != null;
+  const ea = c.fechada ? Number(c.est_energia_agua) : (c.energia_conta_valor != null ? Number(c.energia_conta_valor) - enDias : 0) + (c.agua_conta_valor != null ? Number(c.agua_conta_valor) - agDias : 0);
+  const real = mens + desp + ea, arr = c.fechada ? Number(c.est_arrecadado) : soma(dias, x => x.custo_estrutura), cab = c.fechada ? Number(c.est_cabecas) : soma(dias, x => x.cabecas_dia);
+  const alvo = Number(c.alvo_estrutura || 0), pend = alvo - arr, alvoProx = real + pend;
+  const taxaProx = c.fechada && cProx && cProx.taxa_estrutura != null ? Number(cProx.taxa_estrutura) : cab ? Math.max(alvoProx / cab, 0) : null;
+  const rs4 = v => v == null ? '—' : 'R$ ' + num(v, 4);
+  main.innerHTML = `<div class="card row"><label>Mês <input type="month" id="mMes" value="${st.mes}"></label>
+      <span class="tag ${c.fechada ? 'ok' : ''}">${c.fechada ? 'Mês fechado' : 'Mês em aberto'}</span>
+      ${c.fechada ? '<button class="b warn" id="bReabrirMes">Reabrir mês</button>' : '<button class="b" id="bFecharMes">Fechar mês e gerar a taxa do mês seguinte</button>'}</div>
+
+  <div class="card"><h2>Como o custo é rateado</h2>
+    <p class="mut" style="margin:0">Cada lote paga duas parcelas. <b>Custo direto do dia</b>: diaristas, energia e água medidas, limpeza e outros gastos do dia, divididos pelas cabeças abatidas no dia. <b>Taxa de estrutura</b>: um valor por cabeça igual para todos os lotes do mês, que cobre mensalistas, despesas do menu Despesas e a energia e água fora dos dias de abate. A taxa de um mês é calculada no fechamento do mês anterior, e o que sobra ou falta passa para o mês seguinte.</p></div>
+
+  <div class="card"><h2>Taxa de estrutura em uso neste mês</h2>
+    ${c.taxa_estrutura == null ? '<p class="card aviso" style="margin:0 0 12px">Este mês está sem taxa de estrutura: os lotes pagam só o custo direto do dia, e o relatório sai com esse aviso. Se for o primeiro mês de uso, informe abaixo uma taxa estimada; nos meses seguintes ela vem do fechamento do mês anterior.</p>' : ''}
     <div class="kpis" style="margin-bottom:12px">
-      <div class="kpi"><small>Mensalistas (${fixos.length})</small><b>${brl(totFixos)}</b></div>
-      <div class="kpi"><small>Demais custos mensais</small><b>${brl(totOutros)}</b></div>
-      <div class="kpi"><small>Total mensal</small><b>${brl(total)}</b></div>
-      <div class="kpi big"><small>Diária (total ÷ ${divisor})</small><b>${brl(diaria)}</b></div>
-      <div class="kpi"><small>Dias de abate no mês</small><b>${dias.length}</b></div></div>
-    <form id="fDias" class="row" style="margin-bottom:14px">${campos(F_MES_DIAS, { dias_abate_previstos:divisor })}<button class="b sec">Alterar divisor</button></form>
-    <h2>Mensalistas</h2>
-    <div class="scroll"><table><tr><th>Nome</th><th>Função</th><th class="n">Custo mensal</th></tr>
-    ${fixos.map(x => `<tr><td>${esc(x.nome)}</td><td>${esc(x.funcao)}</td><td class="n">${x.salario_mensal == null ? '<span class="tag">sem valor</span>' : brl(x.salario_mensal)}</td></tr>`).join('') || '<tr><td colspan="3" class="mut">Nenhum mensalista cadastrado.</td></tr>'}</table></div>
-    <p class="mut" style="margin:6px 0 14px">Os mensalistas vêm de Cadastros → Equipe (vínculo "Fixo"). <button class="lnk" id="bIrEquipe">Abrir cadastro de equipe</button></p>
-    <h2>Demais custos mensais deste mês</h2>
-    <div class="scroll"><table><tr><th>Categoria</th><th>Descrição</th><th class="n">Valor</th><th></th></tr>
-    ${cm.map(x => `<tr><td>${CAT[x.categoria]}</td><td>${esc(x.descricao)}</td><td class="n">${brl(x.valor_previsto)}</td>
-      <td><button class="lnk" data-del="${x.id}">excluir</button></td></tr>`).join('') || '<tr><td colspan="4" class="mut">Nenhum outro custo mensal lançado (manutenção, produtos de limpeza etc.).</td></tr>'}</table></div>
-    <form id="fCM" class="row" style="margin-top:10px">
-      <label>Categoria <select name="categoria">${Object.entries(CAT).filter(([k]) => k !== 'ajuste_mes_anterior').map(([k, v]) => `<option value="${k}" ${k === 'manutencao' ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
-      <label>Descrição <input name="descricao"></label>
-      <label>Valor mensal (R$) <input name="valor_previsto" type="number" step="0.01" required></label>
-      <button class="b sec">Adicionar custo</button></form></div>
-  <div class="card"><h2>Despesas do mês e valor por cabeça para o mês seguinte</h2>
-    <p class="mut">Regra: ao fechar o mês, o total das despesas rateáveis (menu Despesas) é dividido pelas cabeças abatidas no mês. O resultado é um valor por cabeça que entra no custo de cada dia de produção do mês seguinte, <b>somado</b> aos custos do dia e à diária dos custos mensais.</p>
-    <div class="kpis" style="margin-bottom:12px">
-      <div class="kpi"><small>Aplicado neste mês (vem do mês anterior)</small><b>${c.taxa_despesas == null ? 'nenhum' : 'R$ ' + num(c.taxa_despesas, 4) + ' / cabeça'}</b></div>
-      <div class="kpi"><small>Despesas rateáveis deste mês</small><b>${brl(despRat)}</b></div>
-      <div class="kpi"><small>Despesas fora do rateio</small><b>${brl(despTot - despRat)}</b></div>
-      <div class="kpi"><small>Cabeças abatidas no mês</small><b>${num(cabMes)}</b></div>
-      <div class="kpi big"><small>${c.fechada ? 'Valor gravado para o mês seguinte' : 'Prévia para o mês seguinte'}</small><b>${c.fechada && cProx && cProx.taxa_despesas != null ? 'R$ ' + num(cProx.taxa_despesas, 4) + ' / cabeça' : cabMes ? 'R$ ' + num(despRat / cabMes, 4) + ' / cabeça' : '—'}</b></div></div>
-    <p><span class="tag ${c.fechada ? 'ok' : ''}">${c.fechada ? 'Mês fechado' : 'Mês em aberto'}</span>
-      ${c.fechada ? '<button class="b warn" id="bReabrirMes">Reabrir mês</button>' : '<button class="b" id="bFecharMes">Fechar mês e gerar o valor por cabeça</button>'}
-      <button class="lnk" id="bIrDesp">Ver despesas do mês</button></p>
-    <p class="mut">Feche o mês depois de lançar todas as despesas e todos os abates dele. Mês fechado não aceita mais lançar, alterar ou excluir despesa. Só o administrador reabre.</p></div>
-  <div class="card"><h2>Contas reais de energia e água (fim do mês)</h2>
-    <p class="mut">Lance quando as contas chegarem. A diferença para o que já foi cobrado nos dias de abate vira o complemento mensal abaixo.</p>
-    <form id="fMes"><div class="grid">${campos(F_MES, c)}</div><p><button class="b">Salvar contas</button></p></form></div>
-  <div class="card"><h2>Complemento mensal</h2>
-    <p class="mut">Energia e água: conta real menos o que já foi cobrado nos dias de abate, rateado por cabeça abatida no mês.</p>
-    <div class="kpis" style="margin-bottom:12px">
-      <div class="kpi"><small>Energia já cobrada nos dias</small><b>${brl(dias.reduce((s, x) => s + Number(x.custo_energia), 0))}</b></div>
-      <div class="kpi"><small>Complemento de energia</small><b>${brl(vm?.complemento_energia)}</b></div>
-      <div class="kpi"><small>Água já cobrada nos dias</small><b>${brl(dias.reduce((s, x) => s + Number(x.custo_agua), 0))}</b></div>
-      <div class="kpi"><small>Complemento de água</small><b>${brl(vm?.complemento_agua)}</b></div>
-      <div class="kpi"><small>Cabeças no mês</small><b>${num(vm?.cabecas_mes)}</b></div></div>
-    <div class="scroll"><table><tr><th>Cooperado</th><th class="n">Cabeças no mês</th><th class="n">Complemento</th></tr>
-    ${vc.map(x => `<tr><td>${esc(nomeDe('cooperados', x.cooperado_id))}</td><td class="n">${num(x.cabecas)}</td><td class="n"><b>${brl(x.complemento)}</b></td></tr>`).join('') || '<tr><td colspan="3" class="mut">Sem lotes no mês.</td></tr>'}</table></div></div>
-  <div class="card"><h2>Dias de abate do mês</h2><div class="scroll"><table><tr><th>Data</th><th class="n">Cabeças</th><th class="n">Custo do dia</th><th class="n">Por cabeça</th><th></th></tr>
-    ${dias.map(x => `<tr><td>${dataBR(x.data)}</td><td class="n">${num(x.cabecas_dia)}</td><td class="n">${brl(x.custo_total)}</td><td class="n">${x.cabecas_dia ? num(x.custo_total / x.cabecas_dia, 4) : '—'}</td>
-      <td><button class="lnk" data-dia="${x.data}">abrir</button></td></tr>`).join('') || '<tr><td colspan="5" class="mut">Nenhum dia de produção no mês.</td></tr>'}</table></div></div>`;
+      <div class="kpi big"><small>Taxa de estrutura</small><b>${c.taxa_estrutura == null ? 'não informada' : rs4(c.taxa_estrutura) + ' / cabeça'}</b></div>
+      <div class="kpi"><small>Cabeças abatidas no mês</small><b>${num(cab)}</b></div>
+      <div class="kpi"><small>Arrecadado pela taxa no mês</small><b>${brl(arr)}</b></div>
+      <div class="kpi"><small>Valor que esta taxa precisa recuperar</small><b>${brl(alvo)}</b></div></div>
+    ${c.fechada ? '' : `<form id="fTaxa" class="row"><label>Taxa de estrutura (R$ por cabeça) <input name="taxa_estrutura" type="number" step="0.0001" min="0" value="${c.taxa_estrutura ?? ''}" style="width:160px"></label>
+      <button class="b sec">Salvar taxa</button><span class="mut">Altere à mão só no primeiro mês ou para uma correção combinada; nos demais, a taxa vem do fechamento anterior.</span></form>`}</div>
+
+  <div class="card"><h2>Estrutura real deste mês ${c.fechada ? '(apurada no fechamento)' : '(prévia)'}</h2>
+    <div class="scroll"><table style="max-width:760px">
+      <tr><td>Mensalistas (${c.fechada ? 'valor do fechamento' : fixos.length + ' no cadastro de equipe'})</td><td class="n">${brl(mens)}</td><td>${c.fechada ? '' : '<button class="lnk" id="bIrEquipe">ver equipe</button>'}</td></tr>
+      <tr><td>Despesas do mês (menu Despesas, categorias que entram na taxa)</td><td class="n">${brl(desp)}</td><td><button class="lnk" id="bIrDesp">ver despesas</button></td></tr>
+      <tr><td>Energia e água fora dos dias de abate (conta real menos o medido nos dias)</td><td class="n">${eaInformada || c.fechada ? brl(ea) : '<span class="tag">conta não informada</span>'}</td><td></td></tr>
+      <tr><td><b>Estrutura real do mês</b></td><td class="n"><b>${brl(real)}</b></td><td></td></tr>
+      <tr><td>${pend >= 0 ? '(+) Faltou recuperar neste mês' : '(−) Sobrou da arrecadação deste mês'}</td><td class="n">${brl(Math.abs(pend))}</td><td class="mut">${brl(alvo)} a recuperar − ${brl(arr)} arrecadado</td></tr>
+      <tr><td><b>A recuperar no mês seguinte</b></td><td class="n"><b>${brl(alvoProx)}</b></td><td></td></tr>
+      <tr><td>Cabeças abatidas no mês</td><td class="n">${num(cab)}</td><td></td></tr></table></div>
+    <div class="kpis" style="margin-top:12px"><div class="kpi big"><small>${c.fechada ? 'Taxa gravada para o mês seguinte' : 'Prévia da taxa do mês seguinte'}</small><b>${taxaProx == null ? '—' : rs4(taxaProx) + ' / cabeça'}</b></div></div>
+    ${c.fechada ? '' : `<p class="mut" style="margin-top:10px">Para fechar o mês: todos os dias de produção fechados${abertos ? ` (há ${abertos} em aberto)` : ''}, todas as despesas lançadas e, de preferência, as contas de energia e água informadas abaixo. Mês fechado trava as despesas e os dias dele; só o administrador reabre.</p>`}</div>
+
+  <div class="card"><h2>Contas reais de energia e água</h2>
+    <p class="mut">Informe os valores das contas do mês. A diferença para o que já foi medido e cobrado nos dias de abate (câmara fria, dias sem produção, variação de tarifa) entra na estrutura do mês.</p>
+    <div class="kpis" style="margin-bottom:12px"><div class="kpi"><small>Energia cobrada nos dias de abate</small><b>${brl(enDias)}</b></div><div class="kpi"><small>Água cobrada nos dias de abate</small><b>${brl(agDias)}</b></div></div>
+    <form id="fContas"><div class="grid">${campos(F_CONTAS, c, c.fechada)}</div><p><button class="b sec" ${c.fechada ? 'disabled' : ''}>Salvar contas</button></p></form></div>
+
+  <div class="card"><h2>Dias de abate do mês</h2><div class="scroll"><table>
+    <tr><th>Data</th><th>Situação</th><th class="n">Cabeças</th><th class="n">Custo direto</th><th class="n">Estrutura</th><th class="n">Total do dia</th><th class="n">Por cabeça</th><th></th></tr>
+    ${dias.map(x => `<tr><td>${dataBR(x.data)}</td><td><span class="tag ${fechadoDia(x.data) ? 'ok' : ''}">${fechadoDia(x.data) ? 'fechado' : 'aberto'}</span></td><td class="n">${num(x.cabecas_dia)}</td><td class="n">${brl(x.custo_direto)}</td><td class="n">${brl(x.custo_estrutura)}</td>
+      <td class="n">${brl(x.custo_total)}</td><td class="n">${Number(x.cabecas_dia) ? num(x.custo_total / x.cabecas_dia, 4) : '—'}</td><td><button class="lnk" data-dia="${x.data}">abrir</button></td></tr>`).join('') || '<tr><td colspan="8" class="mut">Nenhum dia de produção no mês.</td></tr>'}
+    </table></div></div>`;
   $('#mMes').onchange = e => { st.mes = e.target.value; render(); };
-  $('#fMes').onsubmit = async e => { e.preventDefault(); try { await q(sb.from('competencias').update(ler(e.target, F_MES)).eq('competencia', comp)); render(); } catch (er) { falha(er); } };
-  $('#fDias').onsubmit = async e => { e.preventDefault(); try { await q(sb.from('competencias').update(ler(e.target, F_MES_DIAS)).eq('competencia', comp)); render(); } catch (er) { falha(er); } };
-  const fCM = $('#fCM');
-  fCM.onsubmit = async e => { e.preventDefault(); try {
-    await q(sb.from('custos_mensais').insert({ competencia:comp, categoria:fCM.elements.categoria.value, descricao:fCM.elements.descricao.value || null, valor_previsto:Number(fCM.elements.valor_previsto.value) })); render(); } catch (er) { falha(er); } };
-  main.onclick = async e => {
-    const t = e.target;
+  const fT = $('#fTaxa');
+  if (fT) fT.onsubmit = async e => { e.preventDefault(); try { const v = fT.elements.taxa_estrutura.value; await q(sb.from('competencias').update({ taxa_estrutura: v === '' ? null : Number(v) }).eq('competencia', comp)); render(); } catch (er) { falha(er); } };
+  $('#fContas').onsubmit = async e => { e.preventDefault(); try { await q(sb.from('competencias').update(ler(e.target, F_CONTAS)).eq('competencia', comp)); render(); } catch (er) { falha(er); } };
+  main.onclick = async e => { const t = e.target;
     try {
-      if (t.dataset.del) { if (confirm('Excluir este custo mensal?')) { await q(sb.from('custos_mensais').delete().eq('id', t.dataset.del)); render(); } }
-      if (t.id === 'bIrEquipe') { st.cad = 'funcionarios'; st.tab = 'cad'; render(); }
       if (t.dataset.dia) { st.data = t.dataset.dia; st.tab = 'dia'; render(); }
       if (t.id === 'bIrDesp') { st.despMes = st.mes; st.tab = 'desp'; render(); }
-      if (t.id === 'bFecharMes') { if (!confirm(`Fechar ${st.mes.split('-').reverse().join('/')}?\n\nDespesas rateáveis: ${brl(despRat)}\nCabeças abatidas: ${num(cabMes)}\n\nO valor por cabeça será cobrado nos dias de produção do mês seguinte, e as despesas deste mês ficam travadas.`)) return;
-        const tx = await q(sb.rpc('fechar_mes', { p_comp:comp })); alert(`Mês fechado. Valor por cabeça para o mês seguinte: R$ ${num(tx, 4)}.`); render(); }
-      if (t.id === 'bReabrirMes') { if (!confirm('Reabrir o mês? O valor por cabeça gravado para o mês seguinte será apagado até o mês ser fechado de novo.')) return; await q(sb.rpc('reabrir_mes', { p_comp:comp })); render(); }
-    } catch (er) { falha(er); }
-  };
+      if (t.id === 'bIrEquipe') { st.cad = 'funcionarios'; st.tab = 'cad'; render(); }
+      if (t.id === 'bFecharMes') {
+        if (!confirm(`Fechar ${String(mM).padStart(2, '0')}/${aM}?\n\nEstrutura real: ${brl(real)}\nArrecadado pela taxa: ${brl(arr)}\nCabeças abatidas: ${num(cab)}\nTaxa prevista para o mês seguinte: ${taxaProx == null ? '—' : rs4(taxaProx)} por cabeça${eaInformada ? '' : '\n\nATENÇÃO: as contas de energia e água não foram informadas; essa parte ficará fora da estrutura.'}\n\nAs despesas e os dias deste mês ficam travados.`)) return;
+        const r = await q(sb.rpc('fechar_mes', { p_comp:comp })); alert(`Mês fechado. Taxa de estrutura do mês seguinte: ${rs4(r.taxa)} por cabeça.`); render(); }
+      if (t.id === 'bReabrirMes') { if (!confirm('Reabrir o mês? A taxa gravada para o mês seguinte será apagada até o mês ser fechado de novo.')) return; await q(sb.rpc('reabrir_mes', { p_comp:comp })); render(); }
+    } catch (er) { falha(er); } };
 }
 
 // ───────── CÂMARA FRIA E EXPEDIÇÃO ─────────
@@ -893,15 +883,15 @@ async function telaDesp() {
   const total = soma(desp), doCaixa = soma(desp.filter(x => x.fonte === 'caixa')), rateavel = soma(desp.filter(x => cat(x.categoria_id).rateia));
   const porCat = cats.map(c => ({ c, v:soma(desp.filter(x => x.categoria_id === c.id)), n:desp.filter(x => x.categoria_id === c.id).length })).filter(x => x.n).sort((x, y) => y.v - x.v);
   const tabCat = `<table><tr><th>Categoria</th><th class="n">Lançamentos</th><th class="n">Total</th><th class="n">% do mês</th><th>Rateio</th></tr>
-    ${porCat.map(x => `<tr><td>${esc(x.c.nome)}</td><td class="n">${x.n}</td><td class="n">${brl(x.v)}</td><td class="n">${total ? num(100 * x.v / total, 1) : 0}%</td><td>${x.c.rateia ? 'entra no rateio' : 'fora do rateio'}</td></tr>`).join('') || '<tr><td colspan="5" class="mut">Nenhuma despesa no mês.</td></tr>'}
-    <tr class="tot"><td><b>Total</b></td><td class="n"><b>${desp.length}</b></td><td class="n"><b>${brl(total)}</b></td><td></td><td><b>${brl(rateavel)} no rateio</b></td></tr></table>`;
+    ${porCat.map(x => `<tr><td>${esc(x.c.nome)}</td><td class="n">${x.n}</td><td class="n">${brl(x.v)}</td><td class="n">${total ? num(100 * x.v / total, 1) : 0}%</td><td>${x.c.rateia ? 'entra na taxa de estrutura' : 'fora da taxa'}</td></tr>`).join('') || '<tr><td colspan="5" class="mut">Nenhuma despesa no mês.</td></tr>'}
+    <tr class="tot"><td><b>Total</b></td><td class="n"><b>${desp.length}</b></td><td class="n"><b>${brl(total)}</b></td><td></td><td><b>${brl(rateavel)} na taxa</b></td></tr></table>`;
   main.innerHTML = `<div class="card row"><label>Mês <input type="month" id="dMes" value="${mes}"></label><span class="tag ${fechado ? 'ok' : ''}">${fechado ? 'Mês fechado' : 'Mês em aberto'}</span>
       <button class="b sec" id="bRelDesp" ${desp.length || movMes.length ? '' : 'disabled'}>Imprimir relatório do mês</button></div>
     <div class="card"><div class="kpis">
       <div class="kpi"><small>Despesas do mês</small><b>${brl(total)}</b></div>
       <div class="kpi"><small>Pagas pelo caixa interno</small><b>${brl(doCaixa)}</b></div>
       <div class="kpi"><small>Pagas por outra fonte</small><b>${brl(total - doCaixa)}</b></div>
-      <div class="kpi"><small>Entram no rateio do mês seguinte</small><b>${brl(rateavel)}</b></div>
+      <div class="kpi"><small>Entram na taxa de estrutura</small><b>${brl(rateavel)}</b></div>
       <div class="kpi big"><small>Saldo atual do caixa interno</small><b>${brl(saldo)}</b></div></div></div>
     <div class="card"><h2>Nova despesa</h2>
       ${fechado ? '<p class="mut">Este mês está fechado e não aceita novos lançamentos.</p>' : `<form id="fDesp"><div class="grid">
@@ -915,7 +905,7 @@ async function telaDesp() {
         <label>Nº da nota ou recibo <input name="documento"></label>
         <label>Foto da nota ou recibo <input name="arquivo" type="file" accept="image/*,application/pdf"></label></div>
         <p><button class="b">Lançar despesa</button> <span class="mut" id="dMsg"></span></p></form>
-        <p class="mut" style="margin:0">Atenção: não lance aqui o que já é cobrado por outro caminho (diaristas, limpeza e outros custos lançados no Dia de produção, mensalistas, contas de energia e água). Se precisar registrar algo assim só para controle, use uma categoria marcada como "fora do rateio".</p>`}</div>
+        <p class="mut" style="margin:0">Cada gasto tem um lugar só. Diaristas, limpeza e outros gastos do próprio dia de abate vão no Dia de produção; salários dos mensalistas ficam no cadastro de equipe; contas de energia e água vão no Fechamento mensal. Todo o resto é lançado aqui e entra na taxa de estrutura.</p>`}</div>
     <div class="card"><h2>Despesas de ${MESES[m - 1].toLowerCase()} de ${a}</h2><div class="scroll"><table>
       <tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Fornecedor</th><th class="n">Valor</th><th>Pago com</th><th>Forma</th><th>Nota</th><th></th></tr>
       ${desp.map(x => `<tr><td>${dataBR(x.data)}</td><td>${esc(cat(x.categoria_id).nome)}</td><td style="white-space:normal">${esc(x.descricao)}</td><td>${esc(x.fornecedor)}</td><td class="n"><b>${brl(x.valor)}</b></td>
@@ -936,8 +926,8 @@ async function telaDesp() {
       ${movMes.map(x => `<tr><td>${dataBR(x.data)}</td><td><span class="tag ${x.tipo === 'aporte' ? 'ok' : ''}">${x.tipo === 'aporte' ? 'Aporte' : 'Devolução'}</span></td><td class="n">${brl(x.valor)}</td><td>${esc(x.descricao)}</td><td>${esc((x.criado_por || '').split('@')[0])}</td>
         <td><button class="lnk" data-delcx="${x.id}">excluir</button></td></tr>`).join('') || '<tr><td colspan="6" class="mut">Nenhum aporte ou devolução neste mês.</td></tr>'}</table></div></div>
     <div class="card"><details><summary style="cursor:pointer"><b>Categorias de despesa</b></summary>
-      <p class="mut">"Entra no rateio" significa que a despesa compõe o valor por cabeça cobrado no mês seguinte. Desmarque para o que é só controle ou já é cobrado por outro caminho.</p>
-      <div class="scroll"><table><tr><th>Categoria</th><th>Entra no rateio do mês seguinte</th><th>Situação</th><th></th></tr>
+      <p class="mut">"Entra na taxa de estrutura" significa que a despesa compõe o valor por cabeça cobrado no mês seguinte. Desmarque para o que é só controle e não deve ser cobrado dos cooperados.</p>
+      <div class="scroll"><table><tr><th>Categoria</th><th>Entra na taxa de estrutura</th><th>Situação</th><th></th></tr>
       ${cats.map(c => `<tr style="${c.ativo ? '' : 'opacity:.55'}"><td>${esc(c.nome)}</td><td><label style="flex-direction:row;align-items:center;gap:6px;color:var(--ink);font-size:13px"><input type="checkbox" data-rateia="${c.id}" ${c.rateia ? 'checked' : ''}> ${c.rateia ? 'sim' : 'não'}</label></td>
         <td>${c.ativo ? 'ativa' : 'inativa'}</td><td><button class="lnk" data-catativo="${c.id}:${!c.ativo}">${c.ativo ? 'inativar' : 'reativar'}</button></td></tr>`).join('')}</table></div>
       <form id="fCat" class="row" style="margin-top:10px"><label>Nova categoria <input name="nome" required></label><button class="b sec">Adicionar</button></form></details></div>`;
@@ -967,7 +957,7 @@ async function telaDesp() {
       if (t.id === 'bRelDesp') { $('#rel').innerHTML = `
         <div style="display:flex;gap:16px;align-items:center"><img src="logo-copaf.jpg" alt="COPAF" style="height:70px"><div><b style="font-size:15px">Relatório de despesas</b><br>${MESES[m - 1]} de ${a} · Abatedouro</div></div>
         <h2>Resumo</h2><table><tr><td>Total de despesas do mês</td><td class="n"><b>${brl(total)}</b></td><td>Pagas pelo caixa interno</td><td class="n">${brl(doCaixa)}</td></tr>
-          <tr><td>Entram no rateio do mês seguinte</td><td class="n"><b>${brl(rateavel)}</b></td><td>Pagas por outra fonte</td><td class="n">${brl(total - doCaixa)}</td></tr></table>
+          <tr><td>Entram na taxa de estrutura</td><td class="n"><b>${brl(rateavel)}</b></td><td>Pagas por outra fonte</td><td class="n">${brl(total - doCaixa)}</td></tr></table>
         <h2>Despesas por categoria</h2>${tabCat}
         <h2>Caixa interno</h2><table><tr><td>Saldo no início do mês</td><td class="n">${brl(saldoIni)}</td></tr><tr><td>(+) Aportes</td><td class="n">${brl(entradasMes)}</td></tr><tr><td>(−) Despesas pagas pelo caixa</td><td class="n">${brl(doCaixa)}</td></tr>
           <tr><td>(−) Devoluções</td><td class="n">${brl(devolMes)}</td></tr><tr class="tot"><td>Saldo no fim do mês</td><td class="n">${brl(saldoIni + entradasMes - devolMes - doCaixa)}</td></tr></table>
