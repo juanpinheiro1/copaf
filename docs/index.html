@@ -316,7 +316,7 @@ async function telaDia() {
   const pesagens = lotes.length ? await q(sb.from('lote_pesagens').select('*').in('lote_id', lotes.map(l => l.id)).order('id')) : [];
   const embSaidas = lotes.length ? await q(sb.from('embalagem_movimentos').select('*').in('lote_id', lotes.map(l => l.id)).order('id')) : [];
   const conds = lotes.length ? await q(sb.from('lote_condenacoes').select('*').in('lote_id', lotes.map(l => l.id)).order('id')) : [];
-  const embSaldos = lotes.length ? await q(sb.from('v_embalagem_saldo').select('*').in('cooperado_id', [...new Set(lotes.map(l => l.cooperado_id))]).order('nome')) : [];
+  const embSaldos = lotes.length ? await q(sb.from('v_embalagem_saldo').select('*').order('nome')) : [];
   // dia fechado: vale o custo gravado no fechamento, não o recalculado
   if (dia && dia.fechado && dia.f_total != null) cd = { ...cd, custo_diaristas:dia.f_diaristas, custo_energia:dia.f_energia, custo_agua:dia.f_agua,
     custo_limpeza:dia.f_limpeza, custo_outros:dia.f_outros, custo_total:dia.f_total, cabecas_dia:dia.f_cabecas,
@@ -461,15 +461,15 @@ async function telaDia() {
     </table></div></div>`}
 
   ${!le ? '' : `<div class="card" id="cEmb"><h2>Embalagens · lote ${esc(le.codigo)} · ${esc(nomeDe('cooperados', le.cooperado_id))}</h2>
-    <p class="mut">Estoque de embalagens enviado por este cooperado. Clique em "Baixar", digite a quantidade usada neste lote e tecle Enter.</p>
+    <p class="mut">Estoque de embalagens da cooperativa. Clique em "Baixar", digite a quantidade usada neste lote e tecle Enter.</p>
     <div class="scroll"><table><tr><th>Embalagem</th><th class="n">Saldo em estoque</th><th class="n">Usado neste lote</th><th></th></tr>
-    ${embSaldos.filter(e => e.cooperado_id === le.cooperado_id && e.ativo).map(e => { const usado = embDe(le.id).filter(m => m.embalagem_id === e.embalagem_id).reduce((a, m) => a + m.quantidade, 0);
+    ${embSaldos.filter(e => e.ativo).map(e => { const usado = embDe(le.id).filter(m => m.embalagem_id === e.embalagem_id).reduce((a, m) => a + m.quantidade, 0);
       return `<tr><td>${esc(e.nome)}</td><td class="n">${num(e.saldo)} ${e.saldo < 0 ? '<span class="tag">negativo</span>' : e.estoque_minimo != null && e.saldo <= e.estoque_minimo ? '<span class="tag">estoque baixo</span>' : ''}</td>
         <td class="n">${usado ? num(usado) : '<span class="mut">—</span>'}</td>
         <td class="n baixa" data-emb-id="${e.embalagem_id}" data-saldo="${e.saldo}"><button class="b sec" style="padding:4px 10px" data-baixar="${e.embalagem_id}">Baixar</button></td></tr>`; }).join('')
-      || '<tr><td colspan="4" class="mut">Este cooperado ainda não tem embalagens cadastradas. Cadastre e dê entrada na aba Embalagens.</td></tr>'}
+      || '<tr><td colspan="4" class="mut">Nenhuma embalagem cadastrada. Cadastre e dê entrada na aba Embalagens.</td></tr>'}
     </table></div>
-    <p style="margin:12px 0 0"><button type="button" class="b sec" id="bFecharEmb">Fechar painel</button> <button type="button" class="lnk" id="bIrEmb">Abrir estoque de embalagens do cooperado</button></p>
+    <p style="margin:12px 0 0"><button type="button" class="b sec" id="bFecharEmb">Fechar painel</button> <button type="button" class="lnk" id="bIrEmb">Abrir estoque de embalagens</button></p>
     <h2 style="margin-top:16px">Baixas deste lote</h2>
     <div class="scroll"><table><tr><th>Lançado em</th><th>Embalagem</th><th class="n">Quantidade</th><th></th></tr>
     ${embDe(le.id).map(m => `<tr><td>${new Date(m.criado_em).toLocaleString('pt-BR', { dateStyle:'short', timeStyle:'short' })}</td><td>${esc(embNome(m.embalagem_id))}</td><td class="n">${num(m.quantidade)}</td>
@@ -540,7 +540,7 @@ async function telaDia() {
     if (t.dataset.lancar) abrirLanc(t.dataset.lancar);
     if (t.dataset.emb) { st.embLote = Number(t.dataset.emb); await render(); const c = $('#cEmb'); if (c) c.scrollIntoView({ behavior:'smooth' }); }
     if (t.id === 'bFecharEmb') { st.embLote = null; render(); }
-    if (t.id === 'bIrEmb') { st.embCoop = le.cooperado_id; st.tab = 'emb'; render(); }
+    if (t.id === 'bIrEmb') { st.tab = 'emb'; render(); }
     if (t.dataset.baixar) abrirBaixa(Number(t.dataset.baixar));
     if (t.dataset.cond) { st.condLote = Number(t.dataset.cond); await render(); const c = $('#cCond'); if (c) c.scrollIntoView({ behavior:'smooth' }); }
     if (t.id === 'bFecharCond') { st.condLote = null; render(); }
@@ -667,9 +667,9 @@ function relatorio(l, cd, lotes, custoLote, planos, fechado, pesagens, embalagen
     <p style="font-size:11px">Previsão calculada pelo peso médio vivo do lote e pelos rendimentos de referência do abatedouro; o peso real de cada produto pode variar.</p>`}
     ${!pesagens.length ? '' : `<h2>Produção realizada (pesagem de saída)</h2>${tabelaComparativo(l, planos, pesagens)}
     <p style="font-size:11px">Rendimento real = kg pesados ÷ kg vivos destinados ao produto no plano de cortes.</p>`}
-    ${!embalagens.length ? '' : `<h2>Embalagens do cooperado utilizadas</h2>
-    <table><tr><th>Embalagem</th><th class="n">Usado neste lote</th><th class="n">Saldo em estoque</th></tr>
-      ${embalagens.map(e => `<tr><td>${esc(e.nome)}</td><td class="n">${num(e.quantidade)}</td><td class="n">${e.saldo == null ? '—' : num(e.saldo)}</td></tr>`).join('')}</table>`}
+    ${!embalagens.length ? '' : `<h2>Embalagens utilizadas no lote</h2>
+    <table><tr><th>Embalagem</th><th class="n">Quantidade</th></tr>
+      ${embalagens.map(e => `<tr><td>${esc(e.nome)}</td><td class="n">${num(e.quantidade)}</td></tr>`).join('')}</table>`}
     <h2>Custo operacional do dia e parcela do lote</h2>
     <p>Cabeças abatidas no dia: ${num(cd.cabecas_dia)} em ${lotes.length} lote(s). Participação deste lote: ${num(part * 100, 2)}%.</p>
     <table><tr><th>Item</th><th class="n">Custo do dia</th><th class="n">Parcela do lote</th></tr>
@@ -970,23 +970,18 @@ async function telaDesp() {
 
 // ───────── EMBALAGENS (estoque por cooperado) ─────────
 async function telaEmb() {
-  const coops = ativos('cooperados');
-  if (!coops.length) { main.innerHTML = '<div class="card"><p>Cadastre um cooperado antes de controlar embalagens.</p></div>'; return; }
-  if (!coops.some(c => c.id === st.embCoop)) st.embCoop = coops[0].id;
-  const coop = st.embCoop;
-  const saldos = await q(sb.from('v_embalagem_saldo').select('*').eq('cooperado_id', coop).order('nome'));
+  const saldos = await q(sb.from('v_embalagem_saldo').select('*').order('nome'));
   const ids = saldos.map(e => e.embalagem_id);
   const movs = ids.length ? await q(sb.from('embalagem_movimentos').select('*').in('embalagem_id', ids).order('criado_em', { ascending:false }).limit(60)) : [];
   const lotesIds = [...new Set(movs.map(m => m.lote_id).filter(Boolean))];
-  const lotes = lotesIds.length ? await q(sb.from('lotes').select('id,codigo').in('id', lotesIds)) : [];
-  const nome = id => (saldos.find(e => e.embalagem_id === id) || {}).nome || '—', lote = id => (lotes.find(l => l.id === id) || {}).codigo || '';
+  const lotes = lotesIds.length ? await q(sb.from('lotes').select('id,codigo,cooperado_id').in('id', lotesIds)) : [];
+  const nome = id => (saldos.find(e => e.embalagem_id === id) || {}).nome || '—', lote = id => { const l = lotes.find(x => x.id === id); return l ? `${l.codigo} · ${nomeDe('cooperados', l.cooperado_id)}` : ''; };
   const alerta = e => e.saldo < 0 ? '<span class="tag">negativo</span>' : e.estoque_minimo != null && e.saldo <= e.estoque_minimo ? '<span class="tag">estoque baixo</span>' : '';
-  main.innerHTML = `<div class="card row"><label>Cooperado <select id="eCoop">${coops.map(c => `<option value="${c.id}" ${c.id === coop ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}</select></label></div>
-  <div class="card"><h2>Estoque de embalagens · ${esc(nomeDe('cooperados', coop))}</h2>
-    <p class="mut">Embalagens enviadas pelo cooperado. A entrada é lançada aqui, no recebimento; a saída é lançada em cada lote, no Dia de produção.</p>
+  main.innerHTML = `<div class="card"><h2>Estoque de embalagens da cooperativa</h2>
+    <p class="mut">Estoque único, usado por todos os lotes. A entrada é lançada aqui, no recebimento; a saída é lançada em cada lote, no Dia de produção, e aparece abaixo com o lote e o cooperado.</p>
     <div class="scroll"><table><tr><th>Embalagem</th><th class="n">Entradas</th><th class="n">Saídas</th><th class="n">Saldo</th><th class="n">Estoque mínimo</th><th></th></tr>
     ${saldos.map(e => `<tr style="${e.ativo ? '' : 'opacity:.55'}"><td>${esc(e.nome)}${e.ativo ? '' : ' <span class="tag">inativa</span>'}</td><td class="n">${num(e.entradas)}</td><td class="n">${num(e.saidas)}</td><td class="n"><b>${num(e.saldo)}</b> ${alerta(e)}</td><td class="n">${e.estoque_minimo == null ? '—' : num(e.estoque_minimo)}</td>
-      <td class="n entrada" data-emb-id="${e.embalagem_id}">${e.ativo ? `<button class="b sec" style="padding:4px 10px" data-entrada="${e.embalagem_id}">Dar entrada</button> ` : ''}<button class="lnk" data-minimo="${e.embalagem_id}">mínimo</button><button class="lnk" data-ativar="${e.embalagem_id}:${!e.ativo}">${e.ativo ? 'inativar' : 'reativar'}</button></td></tr>`).join('') || '<tr><td colspan="6" class="mut">Nenhuma embalagem cadastrada para este cooperado.</td></tr>'}
+      <td class="n entrada" data-emb-id="${e.embalagem_id}">${e.ativo ? `<button class="b sec" style="padding:4px 10px" data-entrada="${e.embalagem_id}">Dar entrada</button> ` : ''}<button class="lnk" data-minimo="${e.embalagem_id}">mínimo</button><button class="lnk" data-ativar="${e.embalagem_id}:${!e.ativo}">${e.ativo ? 'inativar' : 'reativar'}</button></td></tr>`).join('') || '<tr><td colspan="6" class="mut">Nenhuma embalagem cadastrada.</td></tr>'}
     </table></div>
     <h2 style="margin-top:16px">Nova embalagem</h2>
     <form id="fEmb" class="row">
@@ -995,16 +990,15 @@ async function telaEmb() {
       <label>Quantidade recebida agora (opcional) <input name="inicial" type="number" step="1" min="1"></label>
       <button class="b">Cadastrar</button></form></div>
   <div class="card"><h2>Movimentações recentes</h2><div class="scroll"><table>
-    <tr><th>Data</th><th>Embalagem</th><th>Tipo</th><th class="n">Quantidade</th><th>Lote</th><th>Observação</th><th></th></tr>
+    <tr><th>Data</th><th>Embalagem</th><th>Tipo</th><th class="n">Quantidade</th><th>Lote · cooperado</th><th>Observação</th><th></th></tr>
     ${movs.map(m => `<tr><td>${dataBR(m.data)}</td><td>${esc(nome(m.embalagem_id))}</td><td><span class="tag ${m.tipo === 'entrada' ? 'ok' : 'az'}">${m.tipo === 'entrada' ? 'Entrada' : 'Saída'}</span></td><td class="n">${num(m.quantidade)}</td><td>${esc(lote(m.lote_id))}</td><td>${esc(m.observacao)}</td>
       <td>${m.tipo === 'entrada' ? `<button class="lnk" data-delmov="${m.id}">remover</button>` : '<span class="mut">no lote</span>'}</td></tr>`).join('') || '<tr><td colspan="7" class="mut">Nenhuma movimentação.</td></tr>'}
     </table></div></div>`;
-  $('#eCoop').onchange = e => { st.embCoop = Number(e.target.value); render(); };
   const f = $('#fEmb');
   f.onsubmit = async e => { e.preventDefault(); try {
-    const nova = await q(sb.from('embalagens').insert({ cooperado_id:coop, nome:f.elements.nome.value.trim(), estoque_minimo: f.elements.estoque_minimo.value === '' ? null : Number(f.elements.estoque_minimo.value) }).select().single());
+    const nova = await q(sb.from('embalagens').insert({ nome:f.elements.nome.value.trim(), estoque_minimo: f.elements.estoque_minimo.value === '' ? null : Number(f.elements.estoque_minimo.value) }).select().single());
     if (f.elements.inicial.value) await q(sb.from('embalagem_movimentos').insert({ embalagem_id:nova.id, tipo:'entrada', quantidade:Number(f.elements.inicial.value), data:hoje() }));
-    render(); } catch (er) { falha(/duplicate|unique/i.test(er.message) ? new Error('Este cooperado já tem uma embalagem com essa descrição.') : er); } };
+    render(); } catch (er) { falha(/duplicate|unique/i.test(er.message) ? new Error('Já existe uma embalagem com essa descrição.') : er); } };
   main.onclick = async e => { const t = e.target;
     try {
       if (t.dataset.entrada) { const id = Number(t.dataset.entrada), td = t.parentElement;
