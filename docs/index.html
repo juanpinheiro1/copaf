@@ -63,6 +63,13 @@
     #rel td, #rel th { border-bottom:1px solid #bbb; padding:4px 6px; }
     #rel .tot td { font-weight:700; border-top:2px solid #000; }
     #rel .relaviso { border:2px solid #000; padding:8px 10px; margin:14px 0 0; }
+    #rel .pg-cab { display:flex; gap:14px; align-items:center; font-size:9.5px; line-height:1.35; border-bottom:1px solid #000; padding-bottom:6px; }
+    #rel .pg-logo { display:flex; gap:8px; align-items:center; flex:1.3; } #rel .pg-logo img { height:46px; }
+    #rel .pg-unid { flex:1; border-left:1.5px solid #000; padding-left:8px; }
+    #rel .pg-tit { text-align:center; font-size:13px; margin:12px 0 4px; }
+    #rel table.pg { width:100%; border-collapse:collapse; } #rel table.pg td, #rel table.pg th { border:1.5px solid #000; padding:2px 5px; height:11mm; font-size:12px; text-transform:uppercase; white-space:normal; }
+    #rel table.pg th { height:auto; background:#9bbb59; text-align:center; font-weight:700; } #rel table.pg td.c { text-align:center; font-weight:700; }
+    #rel table.pg tr.pg-tot td { height:8mm; font-weight:700; background:#eef3e4; }
     #rel .assin { display:flex; gap:40px; margin-top:60px; } #rel .assin div { flex:1; border-top:1px solid #000; padding-top:4px; text-align:center; font-size:12px; }
     #rel .previa { border:2px dashed #000; padding:4px 10px; font-weight:700; display:inline-block; }
   }
@@ -376,10 +383,12 @@ async function telaDia() {
     <form id="fDiarista" class="row" style="margin-top:10px">
       <label>Nome do diarista <input name="nome" list="dlDiar" required autocomplete="off" placeholder="digite ou escolha" ${fx ? 'disabled' : ''}>
         <datalist id="dlDiar">${diaristasCad.map(f => `<option value="${esc(f.nome)}"></option>`).join('')}</datalist></label>
+      <label>CPF <input name="cpf" inputmode="numeric" maxlength="14" placeholder="000.000.000-00" style="width:140px" ${fx ? 'disabled' : ''}></label>
       <label>Função (opcional) <input name="funcao" ${fx ? 'disabled' : ''}></label>
       <label>Valor (R$) <input name="valor" type="number" step="0.01" required ${fx ? 'disabled' : ''}></label>
       <button class="b sec" ${fx ? 'disabled' : ''}>Adicionar</button></form>
-    <p class="mut" style="margin:8px 0 0">Nome novo é incluído automaticamente no cadastro de equipe como diarista.</p></div>
+    <p class="mut" style="margin:8px 0 0">Nome novo é incluído automaticamente no cadastro de equipe como diarista, com o CPF informado.</p>
+    <p style="margin:12px 0 0"><button type="button" class="b" id="bPagto" ${diaristas.length ? '' : 'disabled'}>GERAR CONTROLE DE PAGAMENTO</button></p></div>
 
   <div class="card"><h2>Limpeza e outros custos do dia</h2><div class="scroll"><table>
     <tr><th>Categoria</th><th>Descrição</th><th class="n">Valor</th><th></th></tr>
@@ -499,12 +508,14 @@ async function telaDia() {
   };
   $('#fDia').onsubmit = async e => { e.preventDefault(); try { await q(sb.from('dias_producao').update(ler(e.target, F_DIA)).eq('data', d)); render(); } catch (er) { falha(er); } };
   const fD = $('#fDiarista');
-  fD.elements.nome.onchange = e => { const c = acharDiarista(e.target.value); if (c) { if (c.valor_diaria != null) fD.elements.valor.value = c.valor_diaria; fD.elements.funcao.value = c.funcao || ''; } };
+  fD.elements.nome.onchange = e => { const c = acharDiarista(e.target.value); if (c) { if (c.valor_diaria != null) fD.elements.valor.value = c.valor_diaria; fD.elements.funcao.value = c.funcao || ''; fD.elements.cpf.value = c.cpf || ''; } };
   fD.onsubmit = async e => { e.preventDefault(); try {
-    const nome = fD.elements.nome.value.trim(), funcao = fD.elements.funcao.value.trim() || null, valor = Number(fD.elements.valor.value);
+    const nome = fD.elements.nome.value.trim(), funcao = fD.elements.funcao.value.trim() || null, valor = Number(fD.elements.valor.value), cpf = fmtCpf(fD.elements.cpf.value);
     let c = acharDiarista(nome);
-    if (!c) { c = await q(sb.from('funcionarios').insert({ nome, vinculo:'diarista', funcao, valor_diaria:valor }).select().single()); await carregarRef(); }
+    if (!c) { c = await q(sb.from('funcionarios').insert({ nome, vinculo:'diarista', funcao, valor_diaria:valor, cpf }).select().single()); await carregarRef(); }
+    else if (cpf && cpf !== c.cpf) { await q(sb.from('funcionarios').update({ cpf }).eq('id', c.id)); await carregarRef(); }
     await q(sb.from('dia_diaristas').insert({ data:d, funcionario_id:c.id, funcao, valor })); render(); } catch (er) { falha(/duplicate|unique/i.test(er.message) ? new Error('Este diarista já está lançado neste dia.') : er); } };
+  $('#bPagto').onclick = () => controlePagamento(d, diaristas);
   const fC = $('#fCusto');
   fC.onsubmit = async e => { e.preventDefault(); try {
     await q(sb.from('dia_custos').insert({ data:d, categoria:fC.elements.categoria.value, descricao:fC.elements.descricao.value || null, valor:Number(fC.elements.valor.value) })); render(); } catch (er) { falha(er); } };
@@ -644,6 +655,25 @@ async function abrirDia() {
     await q(sb.from('dias_producao').insert({ data:st.data, tarifa_energia:a.tarifa_energia ?? null, tarifa_agua:a.tarifa_agua ?? null }));
     render();
   } catch (e) { falha(e); }
+}
+
+// ───────── CONTROLE DE PAGAMENTO DOS DIARISTAS (impressão / PDF) ─────────
+const fmtCpf = v => { const n = String(v || '').replace(/\D/g, ''); return n.length === 11 ? `${n.slice(0, 3)}.${n.slice(3, 6)}.${n.slice(6, 9)}-${n.slice(9)}` : (String(v || '').trim() || null); };
+function controlePagamento(d, diaristas) {
+  const E = st.ref.estab, f = id => st.ref.funcionarios.find(x => x.id === id) || {};
+  const linhas = diaristas.map(x => ({ nome:(f(x.funcionario_id).nome || '').trim().toUpperCase(), cpf:fmtCpf(f(x.funcionario_id).cpf) || '', valor:Number(x.valor) }))
+    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  const total = linhas.reduce((s, x) => s + x.valor, 0);
+  $('#rel').innerHTML = `
+    <div class="pg-cab"><div class="pg-logo"><img src="logo-copaf.jpg" alt="COPAF"><div><b>${esc(E.razao_social || '')}${E.sigla ? ' - ' + esc(E.sigla) : ''}</b><br>CNPJ: ${esc(E.cnpj || '')}<br>Insc. Est.: ${esc(E.inscricao_estadual || '')}</div></div>
+      <div class="pg-unid"><b>Unidade I · Escritório</b><br>${esc(E.endereco || '')}</div>
+      <div class="pg-unid"><b>Unidade Industrial</b><br>${esc(E.endereco_industrial || '')}</div></div>
+    <div class="pg-tit">CONTROLE PAGAMENTO ABATE DIA ${dataBR(d)} – VALOR PAGO TOTAL</div>
+    <table class="pg"><tr><th style="width:38%">NOME</th><th style="width:18%">CPF</th><th style="width:13%">VALOR</th><th>ASSINATURA</th></tr>
+      ${linhas.map(x => `<tr><td>${esc(x.nome)}</td><td class="c">${esc(x.cpf)}</td><td class="c">${num(x.valor, 2)}</td><td></td></tr>`).join('')}
+      <tr class="pg-tot"><td colspan="2">TOTAL · ${linhas.length} diarista(s)</td><td class="c">${num(total, 2)}</td><td></td></tr></table>
+    <p style="font-size:10px;margin-top:10px">Emitido em ${new Date().toLocaleString('pt-BR')}.</p>`;
+  imprimir('@page { size:A4 portrait; margin:12mm }');
 }
 
 // ───────── RELATÓRIO DO LOTE (impressão / PDF) ─────────
@@ -1107,7 +1137,7 @@ async function telaEtiquetas() {
 
 // ───────── DADOS DO ESTABELECIMENTO ─────────
 const F_ESTAB = [{ k:'razao_social', label:'Razão social' }, { k:'sigla', label:'Sigla' }, { k:'cnpj', label:'CNPJ' }, { k:'inscricao_estadual', label:'Inscrição estadual' }, { k:'registro_sie', label:'Registro no SIE' },
-  { k:'registro_crmv', label:'Registro no CRMV' }, { k:'endereco', label:'Endereço' }, { k:'municipio_abate', label:'Município de abate' }, { k:'uf', label:'UF' }, { k:'ulsav', label:'ULSAV' },
+  { k:'registro_crmv', label:'Registro no CRMV' }, { k:'endereco', label:'Endereço (Unidade I · escritório)' }, { k:'endereco_industrial', label:'Endereço da unidade industrial' }, { k:'municipio_abate', label:'Município de abate' }, { k:'uf', label:'UF' }, { k:'ulsav', label:'ULSAV' },
   { k:'especie', label:'Espécie (como sai nos relatórios)' }, { k:'rt_nome', label:'Responsável técnico' }, { k:'rt_titulo', label:'Título do responsável técnico' }, { k:'rt_crmv', label:'CRMV do responsável técnico' }];
 function telaEstab() {
   main.innerHTML = abasCad() + `<div class="card"><h2>Dados do estabelecimento</h2><p class="mut">Usados no cabeçalho do Mapa de Abate e no relatório de Ocorrências Sanitárias.</p>
@@ -1121,7 +1151,7 @@ const CAD = {
   cooperados:   { nome:'Cooperados', f:[{ k:'nome', label:'Nome', req:true }, { k:'documento', label:'CPF/CNPJ' }, { k:'telefone', label:'Telefone' }, { k:'propriedade', label:'Propriedade (granja)' }, { k:'municipio', label:'Município' }, { k:'uf', label:'UF', def:'PB' }, { k:'ativo', label:'Ativo', type:'checkbox' }] },
   motoristas:   { nome:'Motoristas', f:[{ k:'nome', label:'Nome', req:true }, { k:'ativo', label:'Ativo', type:'checkbox' }] },
   veiculos:     { nome:'Veículos', f:[{ k:'placa', label:'Placa', req:true }, { k:'descricao', label:'Descrição' }, { k:'tara_kg', label:'Tara (kg)', type:'number' }, { k:'ativo', label:'Ativo', type:'checkbox' }] },
-  funcionarios: { nome:'Equipe', f:[{ k:'nome', label:'Nome', req:true }, { k:'vinculo', label:'Vínculo', type:'select', req:true, options:() => [['diarista', 'Diarista'], ['fixo', 'Fixo (mensalista)']] },
+  funcionarios: { nome:'Equipe', f:[{ k:'nome', label:'Nome', req:true }, { k:'cpf', label:'CPF' }, { k:'vinculo', label:'Vínculo', type:'select', req:true, options:() => [['diarista', 'Diarista'], ['fixo', 'Fixo (mensalista)']] },
                   { k:'funcao', label:'Função' }, { k:'valor_diaria', label:'Diária (R$)', type:'number' }, { k:'salario_mensal', label:'Custo mensal (R$)', type:'number' }, { k:'ativo', label:'Ativo', type:'checkbox' }] } };
 
 const abasCad = () => `<div class="card row">${Object.entries(CAD).map(([k, v]) => `<button class="b ${k === st.cad ? '' : 'sec'}" data-cad="${k}">${v.nome}</button>`).join('')}<button class="b ${st.cad === 'rendimentos' ? '' : 'sec'}" data-cad="rendimentos">Rendimentos</button><button class="b ${st.cad === 'etiquetas' ? '' : 'sec'}" data-cad="etiquetas">Etiquetas</button><button class="b ${st.cad === 'estab' ? '' : 'sec'}" data-cad="estab">Estabelecimento</button></div>`;
@@ -1158,7 +1188,7 @@ function telaCad() {
     <form id="fCad"><div class="grid">${campos(c.f)}</div><p><button class="b">Salvar</button> <button type="button" class="b sec" id="bCancel" hidden>Cancelar edição</button></p></form></div>`;
   let editando = null; const f = $('#fCad');
   f.onsubmit = async e => { e.preventDefault(); try {
-    const o = ler(f, c.f); if (o.placa) o.placa = o.placa.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const o = ler(f, c.f); if (o.placa) o.placa = o.placa.toUpperCase().replace(/[^A-Z0-9]/g, ''); if ('cpf' in o) o.cpf = fmtCpf(o.cpf);
     if (editando) await q(sb.from(st.cad).update(o).eq('id', editando)); else await q(sb.from(st.cad).insert(o));
     await carregarRef(); render(); } catch (er) { falha(er); } };
   main.onclick = e => {
