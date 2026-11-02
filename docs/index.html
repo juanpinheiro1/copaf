@@ -216,6 +216,8 @@ function produtosDoPlano(p) {
   return r.concat(p.miudos || []);
 }
 const nomeProduto = c => (st.ref.produtos.find(p => p.codigo === c) || {}).nome || c;
+// produtos em uso (os inativos só aparecem onde já têm pesagem, para não sumir do histórico)
+const produtosAtivos = () => st.ref.produtos.filter(p => p.ativo !== false);
 const pctDe = (tipo, prod) => Number((st.ref.rendimentos.find(r => r.tipo_ave === tipo && r.produto === prod) || {}).pct || 0);
 const pesoMedio = l => l.peso_liquido_kg && l.aves_recebidas ? l.peso_liquido_kg / l.aves_recebidas : null;
 function descPlano(p, tipoAve) {
@@ -297,7 +299,7 @@ const tagRend = (l, r) => r == null ? '' : `<span class="tag ${alertaRend(l, r) 
 // produtos mais pesados pela COPAF primeiro; depois os demais na ordem do cadastro
 function listaSaida(pesagens) {
   const real = {}; for (const w of pesagens) real[w.produto] = (real[w.produto] || 0) + Number(w.peso_kg);
-  const fr = st.ref.freq || {}, usados = st.ref.produtos.filter(p => fr[p.codigo]), outros = st.ref.produtos.filter(p => !usados.includes(p));
+  const fr = st.ref.freq || {}, base = st.ref.produtos.filter(p => p.ativo !== false || real[p.codigo] != null), usados = base.filter(p => fr[p.codigo]), outros = base.filter(p => !usados.includes(p));
   usados.sort((a, b) => (fr[b.codigo] || 0) - (fr[a.codigo] || 0) || a.ordem - b.ordem);
   return { linhas:[...usados, ...outros].map(p => ({ codigo:p.codigo, nome:p.nome, real:real[p.codigo] ?? null, frequente:usados.includes(p) })), total:Object.values(real).reduce((a, x) => a + x, 0) };
 }
@@ -492,7 +494,7 @@ async function telaDia() {
     <details style="margin-top:12px"><summary class="mut" style="cursor:pointer">Lançar produto que não está no plano</summary>
     <form id="fPeso" class="row" style="margin-top:10px">
       <label>Produto <select name="produto" required>${(() => { const noPlano = Object.keys(avesPorProduto(planosDe(lw.id))), op = p => `<option value="${p.codigo}">${esc(p.nome)}</option>`;
-        return (noPlano.length ? `<optgroup label="No plano do lote">${st.ref.produtos.filter(p => noPlano.includes(p.codigo)).map(op).join('')}</optgroup>` : '') + `<optgroup label="Outros produtos">${st.ref.produtos.filter(p => !noPlano.includes(p.codigo)).map(op).join('')}</optgroup>`; })()}</select></label>
+        return (noPlano.length ? `<optgroup label="No plano do lote">${st.ref.produtos.filter(p => noPlano.includes(p.codigo)).map(op).join('')}</optgroup>` : '') + `<optgroup label="Outros produtos">${produtosAtivos().filter(p => !noPlano.includes(p.codigo)).map(op).join('')}</optgroup>`; })()}</select></label>
       <label>Conservação <select name="conservacao"><option value="resfriado">Resfriado</option><option value="congelado">Congelado</option></select></label>
       <label>Peso (kg) <input name="peso_kg" type="number" step="0.01" min="0.01" required></label>
       <label>Volumes (caixas/pacotes) <input name="volumes" type="number" step="1" min="1"></label>
@@ -1134,7 +1136,7 @@ async function telaSie() {
 
 // ───────── CADASTRO DE ETIQUETAS ─────────
 async function telaEtiquetas() {
-  const prods = st.ref.produtos; if (!prods.some(p => p.codigo === st.etqProd)) st.etqProd = (st.ref.etiquetas[0] || prods[0]).produto || prods[0].codigo;
+  const prods = produtosAtivos(); if (!prods.some(p => p.codigo === st.etqProd)) st.etqProd = (st.ref.etiquetas[0] || prods[0]).produto || prods[0].codigo;
   const cod = st.etqProd, m = st.ref.etiquetas.find(x => x.produto === cod) || { produto:cod, nome_impresso:nomeProduto(cod).toUpperCase(), peso_liquido:'1 Kg', nutrientes:{}, validade_congelado_dias:365 }, n = m.nutrientes || {};
   const eanCoop = id => (st.ref.eans.find(x => x.produto === cod && x.cooperado_id === id) || {}).ean || '';
   main.innerHTML = abasCad() + `<div class="card row"><label>Produto <select id="eProd">${prods.map(p => `<option value="${p.codigo}" ${p.codigo === cod ? 'selected' : ''}>${esc(p.nome)}${st.ref.etiquetas.some(x => x.produto === p.codigo) ? '' : ' (sem etiqueta)'}</option>`).join('')}</select></label></div>
@@ -1206,7 +1208,7 @@ async function telaRendimentos() {
     <p class="mut">Usados na previsão do plano de cortes. Valores iniciais da referência técnica Cobb500 Broiler Yield (ave de 2,73 kg, peso seco antes do chiller), conferidos com a Embrapa. Galetinho e frango caipira começam iguais ao frango grande e devem ser ajustados conforme a pesagem real do abatedouro. A alteração é gravada ao sair do campo.</p>
     <p class="mut">Abaixo de cada campo aparece o rendimento real medido nos lotes finalizados com pesagem de saída (kg pesados ÷ kg vivos destinados ao produto). "Adotar" troca a referência pelo valor real.</p>
     <div class="scroll"><table><tr><th>Produto</th>${tipos.map(t => `<th class="n">${esc(t.codigo)} · ${esc(t.nome)}</th>`).join('')}</tr>
-    ${st.ref.produtos.map(p => `<tr><td>${esc(p.nome)}</td>${tipos.map(t => `<td class="n"><input type="number" step="0.01" min="0" max="100" style="width:90px;text-align:right" data-rend="${t.codigo}:${p.codigo}" value="${pctDe(t.codigo, p.codigo)}">${celReal(t.codigo, p.codigo)}</td>`).join('')}</tr>`).join('')}
+    ${produtosAtivos().map(p => `<tr><td>${esc(p.nome)}</td>${tipos.map(t => `<td class="n"><input type="number" step="0.01" min="0" max="100" style="width:90px;text-align:right" data-rend="${t.codigo}:${p.codigo}" value="${pctDe(t.codigo, p.codigo)}">${celReal(t.codigo, p.codigo)}</td>`).join('')}</tr>`).join('')}
     </table></div><p class="msg" id="rMsg" style="color:var(--pri)"></p></div>`;
   main.onclick = async e => { const t = e.target;
     if (t.dataset.cad) { st.cad = t.dataset.cad; render(); }
