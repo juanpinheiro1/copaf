@@ -6,6 +6,7 @@
 <meta name="google" content="notranslate">
 <link rel="icon" href="logo-copaf.jpg">
 <title>COPAF · Gestão do Abatedouro</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@800&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <style>
   :root { --bg:#f4f5f2; --card:#fff; --ink:#1d2a22; --mut:#66736b; --line:#dfe3dc; --pri:#0f8a41; --pri2:#e5f4eb; --warn:#b4541a; --err:#b3261e; --red:#ec1f27; }
@@ -52,9 +53,19 @@
   #login { max-width:340px; margin:12vh auto; }
   #login label { margin-bottom:10px; }
   #rel { display:none; }
+  .avm-logo { font:800 28px/1 'Baloo 2', system-ui, sans-serif; color:#1F4D2B; letter-spacing:-.5px; } .avm-logo span { color:#C2611A; }
+  .avm-por { display:flex; align-items:center; justify-content:center; gap:6px; margin:16px 0 0; font-size:12px; color:var(--mut); }
+  .avm-por .avm-logo { font-size:16px; }
+  .sobre { max-width:760px; margin:0 auto; }
+  .sobre-topo { display:flex; align-items:center; gap:16px; background:#F5EFE0; border-radius:10px; padding:18px 20px; margin-bottom:16px; }
+  .sobre-topo .avm-logo { font-size:40px; } .sobre-topo p { margin:4px 0 0; color:#1F4D2B; }
+  .sobre dl { display:grid; grid-template-columns:170px 1fr; gap:8px 14px; margin:0; } .sobre dt { color:var(--mut); } .sobre dd { margin:0; }
+  .sobre ul { margin:6px 0 0; padding-left:20px; } .sobre li { margin:3px 0; }
+  .avm-rod { display:none; }
   @media print {
     header, main { display:none !important; }
     #rel { display:block; padding:0 8mm; color:#000; }
+    #rel .avm-rod { display:block; margin:14px 0 0; font-size:9px; color:#555; text-align:right; }
     #rel.etqs { padding:0; }
     #rel.pn-rel { padding:0; } #rel .pn-tile, #rel .pn-card, #rel .pn-head { border-color:#ccc; } #rel .pn { gap:8px; } #rel .pn-grid { gap:8px; } #rel .pn-card { padding:8px 12px; } #rel .pn-tab td, #rel .pn-tab th { padding:3px 5px; font-size:11px; }
     #rel .cab { font-size:11px; line-height:1.4; } #rel .cab b { font-size:12px; }
@@ -127,6 +138,7 @@
     <button class="lnk" type="button" id="bEsqueci" style="margin-left:6px">Esqueci a senha</button>
     <p class="msg" id="lMsg"></p>
   </form>
+  <p class="avm-por">Plataforma <svg viewBox="0 0 120 120" width="18" height="18" aria-hidden="true"><circle cx="58" cy="70" r="36" fill="#1F4D2B"/><path d="M92 60 L114 70 L92 80 Z" fill="#E8892B"/><path d="M86 84 C86 97 97 101 97 92 C97 86 91 84 86 84 Z" fill="#E8892B"/><circle cx="72" cy="62" r="6" fill="#F5EFE0"/><rect x="49" y="10" width="16" height="40" rx="5" fill="#F2B705"/><rect x="37" y="22" width="40" height="16" rx="5" fill="#F2B705"/></svg><span class="avm-logo">avi<span>mais</span></span> Abatedouro</p>
   <form id="fPrimeiro" hidden>
     <p class="mut">Use o e-mail que o administrador autorizou e crie a sua senha. Você receberá um e-mail para confirmar o endereço.</p>
     <label>E-mail <input type="email" id="pEmail" required autocomplete="username"></label>
@@ -142,7 +154,7 @@
   <img src="logo-copaf.jpg" alt="COPAF">
   <nav id="nav">
     <button data-tab="dia">Dia de produção</button>
-    <button data-tab="painel">Painel do mês</button>
+    <button data-tab="painel" id="nvPainel" hidden>Painel do mês</button>
     <button data-tab="mes">Fechamento mensal</button>
     <button data-tab="cam">Câmara fria</button>
     <button data-tab="sie">Relatórios SIE</button>
@@ -150,6 +162,7 @@
     <button data-tab="desp">Despesas</button>
     <button data-tab="cad">Cadastros</button>
     <button data-tab="usu" id="nvUsu" hidden>Usuários</button>
+    <button data-tab="sobre">Sobre o sistema</button>
   </nav>
   <span class="user"><span id="uEmail"></span> · <button class="lnk" id="bSair">sair</button></span>
 </header>
@@ -172,8 +185,9 @@ function falha(e) { alert('Erro: ' + e.message); }
 
 // ───────── impressão ─────────
 // pg: regra @page (vazio = A4 retrato); classe: classe aplicada à área de impressão
-function imprimir(pg = '', classe = '') {
+function imprimir(pg = '', classe = '', marca = classe !== 'etqs') {
   $('#pgStyle').textContent = pg; $('#rel').className = classe;
+  if (marca) $('#rel').insertAdjacentHTML('beforeend', `<p class="avm-rod">Gerado pela plataforma Avimais Abatedouro · avimais.com.br</p>`);
   // espera as imagens (logomarca, códigos de barras) carregarem, senão a impressão sai sem elas
   const imgs = [...$('#rel').querySelectorAll('img')];
   Promise.all(imgs.map(i => i.complete && i.naturalWidth ? null : new Promise(r => { i.onload = i.onerror = r; setTimeout(r, 4000); }))).then(() => window.print());
@@ -1334,14 +1348,14 @@ async function telaSie() {
       ABATEDOURO DE AVES - REGISTRO NO SIE Nº ${esc(E.registro_sie)}<br>ENDEREÇO: ${esc((E.endereco || '').toUpperCase())}</div></div>
     <h3>MAPA DE ABATE - ${MESES[m - 1]}/${a}</h3>
     <table class="gr">${cabMapa}${linhasMapa}<tr><td colspan="4" style="border:0"></td><th>TOTAL</th><th class="n">${num(total)}</th></tr></table>
-    <p style="margin-top:40px;font-size:12px;line-height:1.5"><b>${esc((E.rt_nome || '').toUpperCase())}</b><br>${esc((E.rt_titulo || '').toUpperCase())}<br>CRMV ${esc(E.rt_crmv)}</p>`; imprimir(); };
+    <p style="margin-top:40px;font-size:12px;line-height:1.5"><b>${esc((E.rt_nome || '').toUpperCase())}</b><br>${esc((E.rt_titulo || '').toUpperCase())}<br>CRMV ${esc(E.rt_crmv)}</p>`; imprimir('', '', false); };
   $('#bOcorr').onclick = () => { $('#rel').innerHTML = `
     <div class="gov"><b>GOVERNO DA PARAÍBA</b><br>SECRETARIA DE ESTADO DO DESENVOLVIMENTO DA AGROPECUÁRIA E DA PESCA<br>GERÊNCIA EXECUTIVA DE DEFESA AGROPECUÁRIA<br>GERÊNCIA OPERACIONAL DE DEFESA ANIMAL<br>COORDENAÇÃO DE EPIDEMIOLOGIA E ANÁLISE DE RISCO</div>
     <h3>OCORRÊNCIAS SANITÁRIAS EM ESTABELECIMENTOS DE ABATE - CONDENSADO MENSAL</h3>
     <p style="display:flex;justify-content:space-around;font-size:12px"><span><b>ULSAV:</b> ${esc(E.ulsav) || '____________________'}</span><span><b>MÊS:</b> ${MESES[m - 1]}</span><span><b>ANO:</b> ${a}</span></p>
     <table class="gr"><tr><th rowspan="2">DATA ABATE</th><th rowspan="2">PROPRIETÁRIO</th><th rowspan="2">PROPRIEDADE</th><th rowspan="2">MUNICÍPIO DE ORIGEM DOS ANIMAIS</th><th rowspan="2">UF</th><th rowspan="2">ENFERMIDADE DIAGNOSTICADA</th><th colspan="4">ANIMAIS AFETADOS</th><th rowspan="2">MUNICÍPIO EM QUE OS ANIMAIS FORAM ABATIDOS</th></tr>
       <tr><th>ESPÉCIE</th><th>M</th><th>F</th><th>TOTAL</th></tr>${linhasOc || '<tr><td colspan="11" style="text-align:center">Sem ocorrências no mês.</td></tr>'}</table>
-    <p style="margin-top:50px;text-align:right;font-size:11px">_______________________________________<br>CARIMBO / ASSINATURA SERVIDOR</p>`; imprimir('@page { size:A4 landscape; margin:10mm }'); };
+    <p style="margin-top:50px;text-align:right;font-size:11px">_______________________________________<br>CARIMBO / ASSINATURA SERVIDOR</p>`; imprimir('@page { size:A4 landscape; margin:10mm }', '', false); };
 }
 
 // ───────── CADASTRO DE ETIQUETAS ─────────
@@ -1482,11 +1496,37 @@ async function telaUsuarios() {
     try { await q(sb.from('usuarios').update({ papel:t.value }).eq('email', t.dataset.papel)); render(); } catch (er) { falha(er); } };
 }
 
+// ───────── sobre o sistema ─────────
+const VERSAO = '1.0 · novembro de 2026';
+// Painel do mês: por enquanto só para o desenvolvedor (apresentação à diretoria antes do contrato)
+const PAINEL_PARA = ['juan.pinheiro@insiel.com.br'];
+const vePainel = () => PAINEL_PARA.includes((st.email || '').toLowerCase());
+function telaSobre() {
+  main.innerHTML = `<div class="sobre">
+    <div class="sobre-topo"><svg viewBox="0 0 120 120" width="72" height="72" aria-hidden="true"><circle cx="58" cy="70" r="36" fill="#1F4D2B"/><path d="M92 60 L114 70 L92 80 Z" fill="#E8892B"/><path d="M86 84 C86 97 97 101 97 92 C97 86 91 84 86 84 Z" fill="#E8892B"/><circle cx="72" cy="62" r="6" fill="#F5EFE0"/><rect x="49" y="10" width="16" height="40" rx="5" fill="#F2B705"/><rect x="37" y="22" width="40" height="16" rx="5" fill="#F2B705"/></svg><div><span class="avm-logo">avi<span>mais</span></span> <b style="font-size:20px;color:#1F4D2B">Abatedouro</b>
+      <p>Gestão para abatedouros de frango de corte.</p></div></div>
+    <div class="card"><h2>A plataforma</h2>
+      <p style="margin:0">O Avimais Abatedouro organiza o dia a dia do abatedouro, da chegada das aves à expedição:</p>
+      <ul><li>lotes e dias de produção, com custo por cabeça calculado e congelado no fechamento do dia;</li>
+        <li>pesagem de saída por produto e rendimento do lote;</li>
+        <li>câmara fria, embalagens e romaneios de retirada;</li>
+        <li>etiquetas com código de barras e relatórios para o SIE;</li>
+        <li>despesas, caixa, fechamento mensal e controle de pagamento dos diaristas.</li></ul></div>
+    <div class="card"><h2>Informações</h2><dl>
+      <dt>Licenciado para</dt><dd>COPAF – Cooperativa Paraibana de Avicultura e Agricultura Familiar</dd>
+      <dt>Versão</dt><dd>${VERSAO}</dd>
+      <dt>Desenvolvimento</dt><dd>Avimais, software para avicultura. Uma marca da Brasil Comercial Digital, do grupo Insiel, com mais de 30 anos em tecnologia.</dd>
+      <dt>Suporte</dt><dd>WhatsApp <a href="https://wa.me/5583999768000" target="_blank" rel="noopener">(83) 99976-8000</a><br><a href="mailto:juan.pinheiro@insiel.com.br">juan.pinheiro@insiel.com.br</a></dd>
+      <dt>Site</dt><dd><a href="https://avimais.com.br" target="_blank" rel="noopener">avimais.com.br</a></dd>
+    </dl></div></div>`;
+}
+
 // ───────── navegação e sessão ─────────
 async function render() {
+  if (st.tab === 'painel' && !vePainel()) st.tab = 'dia';
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === st.tab));
   main.onclick = null; main.onchange = null; main.onmousemove = null; main.onmouseleave = null;
-  try { await ({ dia:telaDia, painel:telaPainel, mes:telaMes, cam:telaCam, sie:telaSie, emb:telaEmb, desp:telaDesp, cad:telaCad, usu:telaUsuarios })[st.tab](); }
+  try { await ({ dia:telaDia, painel:telaPainel, mes:telaMes, cam:telaCam, sie:telaSie, emb:telaEmb, desp:telaDesp, cad:telaCad, usu:telaUsuarios, sobre:telaSobre })[st.tab](); }
   catch (e) { main.innerHTML = `<div class="card"><p class="msg">Erro ao carregar: ${esc(e.message)}</p></div>`; }
 }
 $('#nav').onclick = e => { if (e.target.dataset.tab) { st.tab = e.target.dataset.tab; render(); } };
@@ -1536,9 +1576,9 @@ sb.auth.onAuthStateChange((ev, sess) => {
   if (sess) setTimeout(async () => {
     try {
       const p = await q(sb.rpc('minha_autorizacao'));
-      st.perfil = p && p.email ? p : null;
+      st.perfil = p && p.email ? p : null; st.email = sess.user.email;
       $('#uEmail').textContent = st.perfil ? `${st.perfil.nome || st.perfil.email} · ${PAPEL[st.perfil.papel]}` : sess.user.email;
-      $('#nav').hidden = !st.perfil; $('#nvUsu').hidden = !st.perfil || st.perfil.papel !== 'admin';
+      $('#nav').hidden = !st.perfil; $('#nvUsu').hidden = !st.perfil || st.perfil.papel !== 'admin'; $('#nvPainel').hidden = !st.perfil || !vePainel();
       if (st.recuperar) return telaNovaSenha();
       if (!st.perfil) return main.innerHTML = `<div class="card"><h2>Acesso não autorizado</h2><p>O e-mail <b>${esc(sess.user.email)}</b> ainda não foi autorizado a usar o sistema. Peça ao administrador para incluí-lo em "Usuários".</p></div>`;
       await carregarRef(); render();
