@@ -486,7 +486,7 @@ async function telaDia() {
       <div class="kpi ${alertaRend(lw, rendGeral(lw, pesado(lw.id))) ? '' : 'big'}"${alertaRend(lw, rendGeral(lw, pesado(lw.id))) ? ' style="background:#fdecdc"' : ''}><small>Rendimento geral (saída ÷ peso vivo)</small><b>${rendGeral(lw, pesado(lw.id)) == null ? '—' : num(rendGeral(lw, pesado(lw.id)), 1) + '%'}</b></div>
       <div class="kpi"><small>Kg por ave abatida</small><b>${pesado(lw.id) && lw.cabecas_pagantes ? num(pesado(lw.id) / lw.cabecas_pagantes, 3) : '—'}</b></div></div>
     ${alertaRend(lw, rendGeral(lw, pesado(lw.id))) ? `<p class="card aviso" style="margin:0 0 12px">O rendimento geral está fora da faixa esperada (${FAIXA_REND[0]}% a ${FAIXA_REND[1]}%). Confira se algum peso foi digitado errado ou lançado no lote errado.</p>` : ''}
-    <p class="mut">Clique em "Lançar peso" na linha do produto, digite os kg e tecle Enter; o sistema passa para o produto seguinte. Os produtos mais pesados pela COPAF aparecem primeiro.</p>
+    <p class="mut">Clique em "Lançar peso" na linha do produto, digite os kg e tecle Enter; o sistema passa para o produto seguinte. Produto que não foi produzido: deixe vazio (ou 0) e tecle Enter, ou clique em "pular"; nada é gravado. Os produtos mais pesados pela COPAF aparecem primeiro.</p>
     <div class="scroll">${planosDe(lw.id).length ? tabelaComparativo(lw, planosDe(lw.id), pesagensDe(lw.id), true) : tabelaSaida(lw, pesagensDe(lw.id), true)}</div>
     <p style="margin:12px 0 0"><button type="button" class="b sec" id="bFecharPeso">Fechar painel</button> <button type="button" class="lnk" data-plano="${lw.id}">${planosDe(lw.id).length ? 'ver plano de cortes' : 'Plano de cortes (opcional)'}</button></p>
     <details style="margin-top:12px"><summary class="mut" style="cursor:pointer">Lançar produto que não está no plano</summary>
@@ -651,16 +651,22 @@ async function telaDia() {
     main.querySelectorAll('td.lanc form').forEach(x => { const c = x.parentElement.dataset.prod; x.parentElement.innerHTML = `<button class="b sec" style="padding:4px 10px" data-lancar="${c}">Lançar peso</button>`; });
     const cons = (planosDe(lw.id).find(p => produtosDoPlano(p).includes(cod)) || {}).conservacao || 'resfriado';
     td.innerHTML = `<form class="row" style="gap:6px;justify-content:flex-end;flex-wrap:nowrap;align-items:center">
-      <input name="peso_kg" type="number" step="0.01" min="0.01" required placeholder="kg" style="width:96px;text-align:right">
+      <input name="peso_kg" type="number" step="0.01" min="0" placeholder="kg" title="Deixe vazio ou 0 para pular o produto" style="width:96px;text-align:right">
       <input name="volumes" type="number" step="1" min="1" placeholder="volumes" style="width:86px;text-align:right">
       <select name="conservacao"><option value="resfriado" ${cons === 'resfriado' ? 'selected' : ''}>Resfriado</option><option value="congelado" ${cons === 'congelado' ? 'selected' : ''}>Congelado</option></select>
-      <button class="b" style="padding:5px 12px">Salvar</button><button type="button" class="lnk" data-cancelar="1">cancelar</button></form>`;
+      <button class="b" style="padding:5px 12px">Salvar</button><button type="button" class="lnk" data-pular="1">pular</button><button type="button" class="lnk" data-cancelar="1">cancelar</button></form>`;
     const fm = td.querySelector('form');
-    fm.onsubmit = async e => { e.preventDefault(); try {
-      await q(sb.from('lote_pesagens').insert({ lote_id:lw.id, produto:cod, conservacao:fm.elements.conservacao.value, peso_kg:Number(fm.elements.peso_kg.value), volumes: fm.elements.volumes.value ? Number(fm.elements.volumes.value) : null }));
+    // vai para o próximo produto; produto sem produção é só pulado, sem gravar nada
+    const irProximo = () => {
       const comPlano = planosDe(lw.id).length > 0, linhas = comPlano ? comparativo(lw, planosDe(lw.id), pesagensDe(lw.id)) : listaSaida(pesagensDe(lw.id)).linhas, i = linhas.findIndex(x => x.codigo === cod);
       const prox = comPlano ? linhas.slice(i + 1).concat(linhas.slice(0, i)).find(x => x.real == null && !x.foraDoPlano) : linhas[i + 1];
-      st.proxLancar = prox ? prox.codigo : null; render(); } catch (er) { falha(er); } };
+      st.proxLancar = prox ? prox.codigo : null; render(); };
+    fm.querySelector('[data-pular]').onclick = e => { e.stopPropagation(); irProximo(); };
+    fm.onsubmit = async e => { e.preventDefault(); try {
+      const kg = Number(fm.elements.peso_kg.value || 0);
+      if (!(kg > 0)) return irProximo();
+      await q(sb.from('lote_pesagens').insert({ lote_id:lw.id, produto:cod, conservacao:fm.elements.conservacao.value, peso_kg:kg, volumes: fm.elements.volumes.value ? Number(fm.elements.volumes.value) : null }));
+      irProximo(); } catch (er) { falha(er); } };
     fm.elements.peso_kg.focus();
   }
   if (lw && st.proxLancar) { const c = st.proxLancar; st.proxLancar = null; abrirLanc(c); }
