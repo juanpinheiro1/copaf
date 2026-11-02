@@ -191,7 +191,9 @@ async function carregarRef() {
     q(sb.from('tipos_ave').select('*').order('codigo')),
     q(sb.from('produtos').select('*').order('ordem')), q(sb.from('rendimentos').select('*')),
     q(sb.from('estabelecimento').select('*').eq('id', 1).maybeSingle()), q(sb.from('etiquetas').select('*')), q(sb.from('etiqueta_eans').select('*'))]);
-  st.ref = { cooperados:co, motoristas:mo, veiculos:ve, funcionarios:fu, tipos_ave:ta, produtos:pr, rendimentos:re, estab:es || {}, etiquetas:et, eans:ee };
+  const usos = await q(sb.from('lote_pesagens').select('produto'));
+  const freq = {}; for (const u of usos) freq[u.produto] = (freq[u.produto] || 0) + 1;
+  st.ref = { cooperados:co, motoristas:mo, veiculos:ve, funcionarios:fu, tipos_ave:ta, produtos:pr, rendimentos:re, estab:es || {}, etiquetas:et, eans:ee, freq };
 }
 const nomeDe = (lista, id, campo = 'nome') => (st.ref[lista].find(x => x.id === id) || {})[campo] || '—';
 const ativos = l => st.ref[l].filter(x => x.ativo !== false);
@@ -284,6 +286,30 @@ function comparativo(l, planos, pesagens) {
     const vivo = pm != null && aves[p.codigo] ? aves[p.codigo] * pm : null, pct = pctDe(l.tipo_ave, p.codigo), r = real[p.codigo] ?? null;
     return { codigo:p.codigo, nome:p.nome, foraDoPlano:aves[p.codigo] == null, prev: vivo != null ? vivo * pct / 100 : null, real:r, pctPrev:pct, pctReal: r != null && vivo ? 100 * r / vivo : null };
   });
+}
+// faixa aceitável do rendimento geral (kg pesados na saída ÷ kg vivos); fora dela, provável erro de lançamento
+const FAIXA_REND = [65, 90];
+const rendGeral = (l, kg) => l.peso_liquido_kg && kg ? 100 * kg / l.peso_liquido_kg : null;
+const foraFaixa = r => r != null && (r < FAIXA_REND[0] || r > FAIXA_REND[1]);
+// durante a pesagem o rendimento ainda está incompleto: abaixo da faixa só alerta com o lote finalizado; acima, sempre
+const alertaRend = (l, r) => r != null && (r > FAIXA_REND[1] || (r < FAIXA_REND[0] && l.status === 'finalizado'));
+const tagRend = (l, r) => r == null ? '' : `<span class="tag ${alertaRend(l, r) ? '' : 'ok'}">${num(r, 1)}%${alertaRend(l, r) ? ' · conferir' : ''}</span>`;
+// produtos mais pesados pela COPAF primeiro; depois os demais na ordem do cadastro
+function listaSaida(pesagens) {
+  const real = {}; for (const w of pesagens) real[w.produto] = (real[w.produto] || 0) + Number(w.peso_kg);
+  const fr = st.ref.freq || {}, usados = st.ref.produtos.filter(p => fr[p.codigo]), outros = st.ref.produtos.filter(p => !usados.includes(p));
+  usados.sort((a, b) => (fr[b.codigo] || 0) - (fr[a.codigo] || 0) || a.ordem - b.ordem);
+  return { linhas:[...usados, ...outros].map(p => ({ codigo:p.codigo, nome:p.nome, real:real[p.codigo] ?? null, frequente:usados.includes(p) })), total:Object.values(real).reduce((a, x) => a + x, 0) };
+}
+function tabelaSaida(l, pesagens, editavel = false) {
+  const { linhas, total } = listaSaida(pesagens), mostrar = editavel ? linhas : linhas.filter(x => x.real != null);
+  if (!mostrar.length) return '';
+  const r = rendGeral(l, total), sep = editavel && linhas.some(x => !x.frequente) && linhas.some(x => x.frequente) ? linhas.findIndex(x => !x.frequente) : -1;
+  return `<table><tr><th>Produto</th><th class="n">Pesado (kg)</th><th class="n">% da produção</th>${editavel ? '<th></th>' : ''}</tr>
+    ${mostrar.map((x, i) => `${i === sep ? `<tr><td colspan="${editavel ? 4 : 3}" class="mut" style="font-size:12px">Outros produtos</td></tr>` : ''}<tr><td>${esc(x.nome)}</td><td class="n">${x.real == null ? '<span class="mut">—</span>' : num(x.real, 1)}</td><td class="n">${x.real == null || !total ? '' : num(100 * x.real / total, 1) + '%'}</td>
+      ${editavel ? `<td class="n lanc" data-prod="${x.codigo}"><button class="b sec" style="padding:4px 10px" data-lancar="${x.codigo}">${x.real == null ? 'Lançar peso' : 'Somar peso'}</button> <button class="lnk" data-etq="${x.codigo}">etiquetas</button></td>` : ''}</tr>`).join('')}
+    <tr class="tot"><td><b>Total da saída</b></td><td class="n"><b>${num(total, 1)}</b></td><td class="n"><b>${total ? '100%' : ''}</b></td>${editavel ? '<td></td>' : ''}</tr></table>
+    <p style="margin:8px 0 0">Rendimento geral do lote: <b>${r == null ? (l.peso_liquido_kg ? '—' : 'lote sem peso de entrada') : num(r, 1) + '% do peso vivo'}</b>${alertaRend(l, r) ? ` <span class="tag">fora da faixa de ${FAIXA_REND[0]}% a ${FAIXA_REND[1]}%: confira os pesos lançados</span>` : ''}</p>`;
 }
 function tabelaComparativo(l, planos, pesagens, editavel = false) {
   const c = comparativo(l, planos, pesagens); if (!c.length) return '';
@@ -413,18 +439,17 @@ async function telaDia() {
   <div class="card"><h2>Lotes do dia</h2>
     <p class="mut">O custo de cada lote é ${fx ? 'definitivo: o dia está fechado.' : 'uma prévia até o dia ser fechado. Para fechar o dia: leituras inicial e final dos medidores, diaristas lançados e todos os lotes finalizados.'}</p>
     <div class="scroll"><table>
-    <tr><th>Lote</th><th>Status</th><th>Cooperado</th><th>Ave</th><th class="n">Peso líq. (kg)</th><th class="n">Aves</th><th class="n">Média (kg)</th><th class="n">Mortos</th><th class="n">Cond.</th><th class="n">Cabeças pagantes</th><th>Plano de cortes</th><th>Pesagem de saída</th><th>Embalagens</th><th class="n">Custo do lote</th><th></th></tr>
+    <tr><th>Lote</th><th>Status</th><th>Cooperado</th><th>Ave</th><th class="n">Peso líq. (kg)</th><th class="n">Aves</th><th class="n">Média (kg)</th><th class="n">Mortos</th><th class="n">Cond.</th><th class="n">Cabeças pagantes</th><th>Saída (kg · rendimento)</th><th>Embalagens</th><th class="n">Custo do lote</th><th></th></tr>
     ${lotes.map(l => `<tr><td>${esc(l.codigo)}</td><td><span class="tag ${STATUS_TAG[l.status]}">${STATUS[l.status]}</span></td><td>${esc(nomeDe('cooperados', l.cooperado_id))}</td><td>${esc(l.tipo_ave)}</td>
       <td class="n">${l.peso_liquido_kg == null ? '<span class="tag">sem pesagem</span>' : num(l.peso_liquido_kg, 0)}</td>
       <td class="n">${num(l.aves_recebidas)}</td><td class="n">${pesoMedio(l) ? num(pesoMedio(l), 2) : '—'}</td>
       <td class="n">${num(l.mortos_chegada)}</td><td class="n">${num(l.condenadas)}</td><td class="n">${num(l.cabecas_pagantes)}</td>
-      <td>${tagPlano(l)} <button class="lnk" data-plano="${l.id}">${fx ? 'ver' : 'montar'}</button></td>
-      <td>${pesado(l.id) ? `<span class="tag ok">${num(pesado(l.id), 1)} kg</span>` : '<span class="tag">não pesado</span>'} <button class="lnk" data-peso="${l.id}">pesar</button></td>
+      <td>${pesado(l.id) ? `${num(pesado(l.id), 1)} kg ${tagRend(l, rendGeral(l, pesado(l.id)))}` : '<span class="tag">não pesado</span>'} <button class="lnk" data-peso="${l.id}">pesar</button></td>
       <td>${embDe(l.id).length ? `<span class="tag ok">${num(embDe(l.id).reduce((a, m) => a + m.quantidade, 0))} un</span>` : '<span class="tag">sem baixa</span>'} <button class="lnk" data-emb="${l.id}">baixar</button></td>
       <td class="n"><b>${brl(custoLote(l.id))}</b></td>
       <td>${fx ? '' : (l.status === 'aberto' ? `<button class="lnk" data-st="${l.id}:em_producao">iniciar produção</button>` : l.status === 'em_producao' ? `<button class="lnk" data-st="${l.id}:finalizado">finalizar</button>` : `<button class="lnk" data-st="${l.id}:em_producao">reabrir lote</button>`)}
         <button class="lnk" data-cond="${l.id}">condenações${condsDe(l.id).length ? ' (' + condsDe(l.id).reduce((a, c) => a + c.quantidade, 0) + ')' : ''}</button>
-        <button class="lnk" data-rel="${l.id}">relatório</button>${fx ? '' : `<button class="lnk" data-edit="${l.id}">editar</button><button class="lnk" data-del="lotes:${l.id}">excluir</button>`}</td></tr>`).join('') || '<tr><td colspan="15" class="mut">Nenhum lote lançado.</td></tr>'}
+        <button class="lnk" data-rel="${l.id}">relatório</button>${fx ? '' : `<button class="lnk" data-edit="${l.id}">editar</button><button class="lnk" data-del="lotes:${l.id}">excluir</button>`}</td></tr>`).join('') || '<tr><td colspan="14" class="mut">Nenhum lote lançado.</td></tr>'}
     </table></div></div>
 
   ${!lp ? '' : `<div class="card" id="cPlano"><h2>Plano de cortes · lote ${esc(lp.codigo)} · ${esc(nomeDe('cooperados', lp.cooperado_id))}</h2>
@@ -458,10 +483,12 @@ async function telaDia() {
     <div class="kpis" style="margin-bottom:12px">
       <div class="kpi"><small>Peso vivo do lote</small><b>${lw.peso_liquido_kg ? num(lw.peso_liquido_kg, 0) + ' kg' : 'sem pesagem'}</b></div>
       <div class="kpi"><small>Total pesado na saída</small><b>${num(pesado(lw.id), 1)} kg</b></div>
-      <div class="kpi big"><small>Rendimento geral do lote</small><b>${lw.peso_liquido_kg && pesado(lw.id) ? num(100 * pesado(lw.id) / lw.peso_liquido_kg, 2) + '%' : '—'}</b></div></div>
-    <p class="mut">Clique em "Lançar peso" na linha do produto, digite os kg e tecle Enter. O sistema já abre o próximo produto a pesar.</p>
-    <div class="scroll">${tabelaComparativo(lw, planosDe(lw.id), pesagensDe(lw.id), true) || '<p class="mut">Este lote ainda não tem plano de cortes. Monte o plano para lançar o peso direto em cada produto, ou use o lançamento avulso abaixo.</p>'}</div>
-    <p style="margin:12px 0 0"><button type="button" class="b sec" id="bFecharPeso">Fechar painel</button></p>
+      <div class="kpi ${alertaRend(lw, rendGeral(lw, pesado(lw.id))) ? '' : 'big'}"${alertaRend(lw, rendGeral(lw, pesado(lw.id))) ? ' style="background:#fdecdc"' : ''}><small>Rendimento geral (saída ÷ peso vivo)</small><b>${rendGeral(lw, pesado(lw.id)) == null ? '—' : num(rendGeral(lw, pesado(lw.id)), 1) + '%'}</b></div>
+      <div class="kpi"><small>Kg por ave abatida</small><b>${pesado(lw.id) && lw.cabecas_pagantes ? num(pesado(lw.id) / lw.cabecas_pagantes, 3) : '—'}</b></div></div>
+    ${alertaRend(lw, rendGeral(lw, pesado(lw.id))) ? `<p class="card aviso" style="margin:0 0 12px">O rendimento geral está fora da faixa esperada (${FAIXA_REND[0]}% a ${FAIXA_REND[1]}%). Confira se algum peso foi digitado errado ou lançado no lote errado.</p>` : ''}
+    <p class="mut">Clique em "Lançar peso" na linha do produto, digite os kg e tecle Enter; o sistema passa para o produto seguinte. Os produtos mais pesados pela COPAF aparecem primeiro.</p>
+    <div class="scroll">${planosDe(lw.id).length ? tabelaComparativo(lw, planosDe(lw.id), pesagensDe(lw.id), true) : tabelaSaida(lw, pesagensDe(lw.id), true)}</div>
+    <p style="margin:12px 0 0"><button type="button" class="b sec" id="bFecharPeso">Fechar painel</button> <button type="button" class="lnk" data-plano="${lw.id}">${planosDe(lw.id).length ? 'ver plano de cortes' : 'Plano de cortes (opcional)'}</button></p>
     <details style="margin-top:12px"><summary class="mut" style="cursor:pointer">Lançar produto que não está no plano</summary>
     <form id="fPeso" class="row" style="margin-top:10px">
       <label>Produto <select name="produto" required>${(() => { const noPlano = Object.keys(avesPorProduto(planosDe(lw.id))), op = p => `<option value="${p.codigo}">${esc(p.nome)}</option>`;
@@ -569,7 +596,9 @@ async function telaDia() {
     if (t.dataset.st) { const [id, novo] = t.dataset.st.split(':'), l = lotes.find(x => x.id === Number(id)), agora = new Date().toTimeString().slice(0, 5), up = { status:novo, finalizado_em:null };
       if (novo === 'em_producao' && !l.hora_inicio) up.hora_inicio = agora;
       if (novo === 'finalizado') {
-        if (!confirm(`Finalizar o lote ${l.codigo}?\n\nConfira antes: mortos na chegada (${l.mortos_chegada}), condenadas (${l.condenadas}) e cabeças pagantes (${l.cabecas_pagantes}).`)) return;
+        const kg = pesado(l.id), r = rendGeral(l, kg);
+        const aviso = !kg ? '\n\nATENÇÃO: este lote não tem nenhuma pesagem de saída.' : foraFaixa(r) ? `\n\nATENÇÃO: rendimento geral de ${num(r, 1)}%, fora da faixa de ${FAIXA_REND[0]}% a ${FAIXA_REND[1]}%. Confira os pesos lançados.` : '';
+        if (!confirm(`Finalizar o lote ${l.codigo}?\n\nConfira antes: mortos na chegada (${l.mortos_chegada}), condenadas (${l.condenadas}) e cabeças pagantes (${l.cabecas_pagantes}).${aviso}`)) return;
         if (!l.hora_termino) up.hora_termino = agora; up.finalizado_em = new Date().toISOString(); }
       try { await q(sb.from('lotes').update(up).eq('id', id)); render(); } catch (er) { falha(er); } }
     if (t.id === 'bIrMes') { st.mes = d.slice(0, 7); st.tab = 'mes'; render(); }
@@ -629,8 +658,8 @@ async function telaDia() {
     const fm = td.querySelector('form');
     fm.onsubmit = async e => { e.preventDefault(); try {
       await q(sb.from('lote_pesagens').insert({ lote_id:lw.id, produto:cod, conservacao:fm.elements.conservacao.value, peso_kg:Number(fm.elements.peso_kg.value), volumes: fm.elements.volumes.value ? Number(fm.elements.volumes.value) : null }));
-      const linhas = comparativo(lw, planosDe(lw.id), pesagensDe(lw.id)), i = linhas.findIndex(x => x.codigo === cod);
-      const prox = linhas.slice(i + 1).concat(linhas.slice(0, i)).find(x => x.real == null && !x.foraDoPlano);
+      const comPlano = planosDe(lw.id).length > 0, linhas = comPlano ? comparativo(lw, planosDe(lw.id), pesagensDe(lw.id)) : listaSaida(pesagensDe(lw.id)).linhas, i = linhas.findIndex(x => x.codigo === cod);
+      const prox = comPlano ? linhas.slice(i + 1).concat(linhas.slice(0, i)).find(x => x.real == null && !x.foraDoPlano) : linhas[i + 1];
       st.proxLancar = prox ? prox.codigo : null; render(); } catch (er) { falha(er); } };
     fm.elements.peso_kg.focus();
   }
@@ -704,8 +733,7 @@ function relatorio(l, cd, lotes, custoLote, planos, fechado, pesagens, embalagen
       ${planos.map(p => `<tr><td class="n">${num(p.aves)}</td><td style="white-space:normal">${esc(descPlano(p, l.tipo_ave))}</td><td>${p.conservacao === 'congelado' ? 'Congelado' : 'Resfriado'}</td></tr>`).join('')}</table>
     ${pesagens.length ? '' : `<h2>Produção prevista</h2>${tabelaPrevisao(l, planos)}`}
     <p style="font-size:11px">Previsão calculada pelo peso médio vivo do lote e pelos rendimentos de referência do abatedouro; o peso real de cada produto pode variar.</p>`}
-    ${!pesagens.length ? '' : `<h2>Produção realizada (pesagem de saída)</h2>${tabelaComparativo(l, planos, pesagens)}
-    <p style="font-size:11px">Rendimento real = kg pesados ÷ kg vivos destinados ao produto no plano de cortes.</p>`}
+    ${!pesagens.length ? '' : `<h2>Produção realizada (pesagem de saída)</h2>${planos.length ? tabelaComparativo(l, planos, pesagens) + '<p style="font-size:11px">Rendimento real = kg pesados ÷ kg vivos destinados ao produto no plano de cortes.</p>' : tabelaSaida(l, pesagens)}`}
     ${!embalagens.length ? '' : `<h2>Embalagens utilizadas no lote</h2>
     <table><tr><th>Embalagem</th><th class="n">Quantidade</th></tr>
       ${embalagens.map(e => `<tr><td>${esc(e.nome)}</td><td class="n">${num(e.quantidade)}</td></tr>`).join('')}</table>`}
