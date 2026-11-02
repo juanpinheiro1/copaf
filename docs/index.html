@@ -56,6 +56,7 @@
     header, main { display:none !important; }
     #rel { display:block; padding:0 8mm; color:#000; }
     #rel.etqs { padding:0; }
+    #rel.pn-rel { padding:0; } #rel .pn-tile, #rel .pn-card, #rel .pn-head { border-color:#ccc; } #rel .pn { gap:8px; } #rel .pn-grid { gap:8px; } #rel .pn-card { padding:8px 12px; } #rel .pn-tab td, #rel .pn-tab th { padding:3px 5px; font-size:11px; }
     #rel .cab { font-size:11px; line-height:1.4; } #rel .cab b { font-size:12px; }
     #rel .gov { text-align:center; font-size:10px; line-height:1.35; } #rel h3 { text-align:center; font-size:13px; margin:14px 0 8px; }
     #rel table.gr td, #rel table.gr th { border:1px solid #000; padding:3px 5px; font-size:11px; white-space:normal; } #rel table.gr th { background:#d9e6c3; }
@@ -91,6 +92,26 @@
   .etq .dir svg { width:100%; height:auto; margin-top:1.5mm; }
   .etq .pl { text-align:center; font-weight:700; font-size:11pt; letter-spacing:.3px; }
   .previa-etq { display:inline-block; border:1px dashed var(--mut); border-radius:4px; }
+  /* painel do mês */
+  .pn { display:flex; flex-direction:column; gap:14px; }
+  .pn-head { display:flex; align-items:center; gap:16px; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 16px; }
+  .pn-head img { height:56px; } .pn-head h2 { margin:0; font-size:19px; } .pn-head p { margin:2px 0 0; color:var(--mut); font-size:13px; }
+  .pn-emit { margin-left:auto; color:var(--mut); font-size:12px; }
+  .pn-aviso { background:#fff6e9; border:1px solid #f0c48a; color:#7a3d0c; border-radius:10px; padding:10px 14px; font-size:13px; }
+  .pn-tiles { display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:10px; }
+  .pn-tile { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:2px; }
+  .pn-tile small { color:var(--mut); font-size:11.5px; } .pn-tile b { font-size:21px; font-variant-numeric:tabular-nums; color:var(--ink); } .pn-tile span { color:var(--mut); font-size:11.5px; }
+  .pn-tile.pn-dest { border-left:4px solid var(--pri); }
+  .pn-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:14px; }
+  .pn-card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 16px; break-inside:avoid; }
+  .pn-card h3 { margin:0 0 4px; font-size:15px; } .pn-sub { margin:0 0 8px; color:var(--mut); font-size:12px; }
+  .pn-svg { width:100%; height:auto; display:block; } .pn-ax { font-size:11px; fill:#66736b; } .pn-lab { font-size:12px; fill:#1d2a22; } .pn-val { font-size:11.5px; fill:#1d2a22; font-variant-numeric:tabular-nums; }
+  .pn-leg { width:100%; margin-top:8px; font-size:13px; } .pn-leg td { padding:3px 6px; border-bottom:1px solid var(--line); }
+  .pn-dot { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:7px; vertical-align:-1px; }
+  .pn-tab { font-size:13px; } .pn-tab tr.pn-tot td { font-weight:700; border-top:2px solid var(--ink); }
+  .pn-nota { color:var(--mut); font-size:11.5px; margin:0; }
+  .pn-tipbox { position:fixed; z-index:50; background:#1d2a22; color:#fff; font-size:12px; padding:6px 9px; border-radius:6px; max-width:320px; pointer-events:none; }
+  @media (max-width:900px) { .pn-tiles { grid-template-columns:repeat(2, minmax(0,1fr)); } .pn-grid { grid-template-columns:1fr; } }
 </style>
 <style id="pgStyle"></style>
 </head>
@@ -121,6 +142,7 @@
   <img src="logo-copaf.jpg" alt="COPAF">
   <nav id="nav">
     <button data-tab="dia">Dia de produção</button>
+    <button data-tab="painel">Painel do mês</button>
     <button data-tab="mes">Fechamento mensal</button>
     <button data-tab="cam">Câmara fria</button>
     <button data-tab="sie">Relatórios SIE</button>
@@ -761,6 +783,194 @@ function relatorio(l, cd, lotes, custoLote, planos, fechado, pesagens, embalagen
   imprimir();
 }
 
+// ───────── PAINEL DO MÊS (apresentação à diretoria) ─────────
+// cores das séries: paleta categórica validada (ordem fixa); série única usa o verde da marca
+const PN_SERIES = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300'];
+const PN_VERDE = '#0f8a41';
+const pnPct = (v, d = 1) => v == null || !isFinite(v) ? '—' : num(v, d) + '%';
+const pnTip = t => ` data-tip="${esc(t)}"`;
+// barras verticais, uma série
+function pnBarrasV(dados, { fmt = v => num(v), alt = 170 } = {}) {
+  if (!dados.length) return '<p class="mut">Sem dados no período.</p>';
+  const W = 640, H = alt, pe = 34, pb = 26, pt = 14, larg = (W - pe - 8) / dados.length, max = Math.max(...dados.map(d => d.v), 1);
+  const y = v => pt + (H - pt - pb) * (1 - v / max), bw = Math.min(46, larg * 0.62);
+  const grade = [0, 0.5, 1].map(f => `<line x1="${pe}" x2="${W - 4}" y1="${y(max * f)}" y2="${y(max * f)}" stroke="#e4e6e1"/><text x="${pe - 6}" y="${y(max * f) + 4}" text-anchor="end" class="pn-ax">${fmt(max * f)}</text>`).join('');
+  const barras = dados.map((d, i) => { const x = pe + i * larg + (larg - bw) / 2, h = Math.max(0, H - pb - y(d.v));
+    return `<g${pnTip(d.tip || `${d.rot}: ${fmt(d.v)}`)}><rect x="${x - 4}" y="${pt}" width="${bw + 8}" height="${H - pt - pb}" fill="transparent"/>
+      <path d="M${x},${H - pb} v${-Math.max(h - 4, 0)} q0,-4 4,-4 h${bw - 8} q4,0 4,4 v${Math.max(h - 4, 0)} z" fill="${d.cor || PN_VERDE}"/>
+      <text x="${x + bw / 2}" y="${H - 8}" text-anchor="middle" class="pn-ax">${esc(d.rot)}</text>
+      ${dados.length <= 12 ? `<text x="${x + bw / 2}" y="${y(d.v) - 5}" text-anchor="middle" class="pn-val">${fmt(d.v)}</text>` : ''}</g>`; }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" class="pn-svg" role="img">${grade}${barras}</svg>`;
+}
+// barras horizontais; faixa opcional [min,max] desenhada como referência
+function pnBarrasH(dados, { fmt = v => num(v), faixa = null, max = null } = {}) {
+  if (!dados.length) return '<p class="mut">Sem dados no período.</p>';
+  const lin = 26, W = 640, pe = 190, pd = 70, H = dados.length * lin + (faixa ? 22 : 6), mx = max || Math.max(...dados.map(d => d.v), faixa ? faixa[1] : 0, 1);
+  const x = v => pe + (W - pe - pd) * Math.min(v, mx) / mx;
+  const ref = faixa ? `<rect x="${x(faixa[0])}" y="2" width="${x(faixa[1]) - x(faixa[0])}" height="${dados.length * lin}" fill="#e5f4eb"/>
+    <text x="${x(faixa[0])}" y="${dados.length * lin + 16}" class="pn-ax" text-anchor="middle">${fmt(faixa[0])}</text><text x="${x(faixa[1])}" y="${dados.length * lin + 16}" class="pn-ax" text-anchor="middle">${fmt(faixa[1])}</text>` : '';
+  const barras = dados.map((d, i) => { const yy = i * lin + 5, w = Math.max(x(d.v) - pe, 2);
+    return `<g${pnTip(d.tip || `${d.rot}: ${fmt(d.v)}`)}><rect x="0" y="${yy - 3}" width="${W}" height="${lin}" fill="transparent"/>
+      <text x="${pe - 8}" y="${yy + 12}" text-anchor="end" class="pn-lab">${esc(d.rot)}</text>
+      <path d="M${pe},${yy} h${Math.max(w - 4, 0)} q4,0 4,4 v8 q0,4 -4,4 h${-Math.max(w - 4, 0)} z" fill="${d.cor || PN_VERDE}"/>
+      <text x="${pe + w + 6}" y="${yy + 12}" class="pn-val">${fmt(d.v)}${d.alerta ? ' ⚠' : ''}</text></g>`; }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" class="pn-svg" role="img">${ref}${barras}</svg>`;
+}
+// barra 100% empilhada + legenda com valores (a legenda carrega os rótulos)
+function pnPilha(segs, fmt = brl) {
+  const tot = segs.reduce((a, s) => a + s.v, 0); if (!tot) return '<p class="mut">Sem dados no período.</p>';
+  let acc = 0; const W = 640, gap = 2;
+  const barras = segs.filter(s => s.v > 0).map(s => { const w = (W * s.v) / tot, x0 = acc; acc += w;
+    return `<rect x="${x0 + (x0 ? gap / 2 : 0)}" y="0" width="${Math.max(w - gap, 1)}" height="26" rx="4" fill="${s.cor}"${pnTip(`${s.nome}: ${fmt(s.v)} (${num(100 * s.v / tot, 1)}%)`)}/>`; }).join('');
+  return `<svg viewBox="0 0 ${W} 26" class="pn-svg" role="img">${barras}</svg>
+    <table class="pn-leg">${segs.map(s => `<tr><td><span class="pn-dot" style="background:${s.cor}"></span>${esc(s.nome)}</td><td class="n">${fmt(s.v)}</td><td class="n mut">${num(100 * s.v / tot, 1)}%</td></tr>`).join('')}
+      <tr><td><b>Total</b></td><td class="n"><b>${fmt(tot)}</b></td><td></td></tr></table>`;
+}
+function pnGrupoProduto(codigo, nome) {
+  const n = (nome || '').toUpperCase();
+  if (codigo.startsWith('frango') || codigo.startsWith('inteiro')) return 'Frango inteiro';
+  if (/MOELA|CORA|F[IÍ]GADO|PESCO|P[EÉ] |P[EÉ]$|CANJA/.test(n) || ['moela', 'coracao', 'figado', 'pescoco', 'pe', 'dorso'].includes(codigo.replace('_bdj', ''))) return 'Miúdos, pés e canja';
+  if (codigo.endsWith('_bdj')) return 'Cortes em bandeja';
+  return 'Cortes a granel';
+}
+
+async function dadosPainel(mes) {
+  const ini = mes + '-01', [a, m] = mes.split('-').map(Number), fim = `${m === 12 ? a + 1 : a}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01`;
+  const [lotes, dias, vdia, comp] = await Promise.all([
+    q(sb.from('lotes').select('*').gte('data', ini).lt('data', fim).order('data').order('ordem')),
+    q(sb.from('dias_producao').select('data,fechado').gte('data', ini).lt('data', fim).order('data')),
+    q(sb.from('v_custo_dia').select('*').gte('data', ini).lt('data', fim).order('data')),
+    q(sb.from('competencias').select('*').eq('competencia', ini).maybeSingle())]);
+  const ids = lotes.map(l => l.id);
+  const [pes, conds, vlote, diar, desp, cats, cx, embm] = await Promise.all([
+    ids.length ? q(sb.from('lote_pesagens').select('lote_id,produto,peso_kg').in('lote_id', ids)) : [],
+    ids.length ? q(sb.from('lote_condenacoes').select('lote_id,enfermidade,quantidade').in('lote_id', ids)) : [],
+    q(sb.from('v_custo_lote').select('lote_id,custo_lote').gte('data', ini).lt('data', fim)),
+    q(sb.from('dia_diaristas').select('data,valor').gte('data', ini).lt('data', fim)),
+    q(sb.from('despesas').select('data,valor,fonte,categoria_id').gte('data', ini).lt('data', fim)),
+    q(sb.from('despesa_categorias').select('id,nome,rateia')),
+    q(sb.from('caixa_movimentos').select('data,tipo,valor')),
+    ids.length ? q(sb.from('embalagem_movimentos').select('lote_id,quantidade').eq('tipo', 'saida').in('lote_id', ids)) : []]);
+  const exps = await q(sb.from('expedicoes').select('id,data').gte('data', ini).lt('data', fim));
+  const expIt = exps.length ? await q(sb.from('expedicao_itens').select('expedicao_id,peso_kg').in('expedicao_id', exps.map(e => e.id))) : [];
+  const camara = await q(sb.from('v_camara_saldo').select('saldo_kg'));
+  return { mes, a, m, lotes, dias, vdia, comp, pes, conds, vlote, diar, desp, cats, cx, embm, exps, expIt, camara };
+}
+
+function htmlPainel(D, imprimir = false) {
+  const { lotes, dias, vdia, comp, pes, conds, vlote, diar, desp, cats } = D, soma = (l, f) => l.reduce((s, x) => s + Number(f(x) || 0), 0);
+  const kgLote = id => soma(pes.filter(p => p.lote_id === id), p => p.peso_kg);
+  const recebidas = l => l.aves_recebidas != null ? l.aves_recebidas : (l.carcacas_contadas || 0) + (l.mortos_chegada || 0) + (l.condenadas || 0);
+  const abatidas = l => recebidas(l) - (l.mortos_chegada || 0);
+  const nAves = soma(lotes, recebidas), nAbat = soma(lotes, abatidas), nMortos = soma(lotes, l => l.mortos_chegada), nCond = soma(lotes, l => l.condenadas), nPag = soma(lotes, l => l.cabecas_pagantes);
+  const comPeso = lotes.filter(l => l.peso_liquido_kg > 0), pesoVivo = soma(comPeso, l => l.peso_liquido_kg), avesComPeso = soma(comPeso, recebidas);
+  const producao = soma(pes, p => p.peso_kg);
+  const rendL = l => l.peso_liquido_kg > 0 && kgLote(l.id) > 0 ? 100 * kgLote(l.id) / l.peso_liquido_kg : null;
+  const validos = comPeso.filter(l => rendL(l) != null && !foraFaixa(rendL(l))), foraLotes = comPeso.filter(l => rendL(l) != null && foraFaixa(rendL(l)));
+  const rendMes = soma(validos, l => kgLote(l.id)) / Math.max(soma(validos, l => l.peso_liquido_kg), 1) * 100;
+  // custos
+  const cDiar = soma(vdia, v => v.custo_diaristas), cEn = soma(vdia, v => v.custo_energia), cAg = soma(vdia, v => v.custo_agua), cLimp = soma(vdia, v => v.custo_limpeza), cOut = soma(vdia, v => v.custo_outros), cEstrCobr = soma(vdia, v => v.custo_estrutura);
+  const cDireto = cDiar + cEn + cAg + cLimp + cOut;
+  const fixos = st.ref.funcionarios.filter(f => f.vinculo === 'fixo' && f.ativo !== false), cMens = comp && comp.fechada && comp.est_mensalistas != null ? Number(comp.est_mensalistas) : soma(fixos, f => f.salario_mensal);
+  const catRat = id => (cats.find(c => c.id === id) || {}).rateia, cDesp = soma(desp.filter(d => catRat(d.categoria_id)), d => d.valor);
+  const eaE = comp && comp.energia_conta_valor != null ? comp.energia_conta_valor - cEn : 0, eaA = comp && comp.agua_conta_valor != null ? comp.agua_conta_valor - cAg : 0, cEA = eaE + eaA;
+  const cEstr = cMens + cDesp + cEA, cReal = cDireto + cEstr;
+  const diaristasDia = diar.length, avesPorDiarista = diaristasDia ? nAbat / diaristasDia : null;
+  // velocidade (lotes com início e término coerentes)
+  const hrs = l => { if (!l.hora_inicio || !l.hora_termino) return null; const [h1, m1] = l.hora_inicio.split(':').map(Number), [h2, m2] = l.hora_termino.split(':').map(Number); const min = h2 * 60 + m2 - (h1 * 60 + m1) - (l.minutos_parada || 0); return min > 10 ? min / 60 : null; };
+  const comHora = lotes.filter(l => hrs(l)), velocidade = comHora.length ? soma(comHora, abatidas) / soma(comHora, hrs) : null;
+  // qualidade dos dados
+  const pend = [];
+  const nf = lotes.filter(l => l.status !== 'finalizado').length; if (nf) pend.push(`${nf} de ${lotes.length} lotes não finalizados`);
+  const da = dias.filter(d => !d.fechado).length; if (da) pend.push(`${da} de ${dias.length} dias de produção abertos`);
+  const sp = lotes.filter(l => !kgLote(l.id)).length; if (sp) pend.push(`${sp} lote(s) sem pesagem de saída`);
+  if (foraLotes.length) pend.push(`${foraLotes.length} lote(s) com rendimento fora da faixa de ${FAIXA_REND[0]}% a ${FAIXA_REND[1]}% (fora do cálculo do rendimento do mês)`);
+  if (!comp || comp.taxa_estrutura == null) pend.push('taxa de estrutura do mês não aplicada aos lotes');
+  if (!comp || (comp.energia_conta_valor == null && comp.agua_conta_valor == null)) pend.push('contas reais de energia e água não lançadas');
+  if (!D.exps.length && producao) pend.push('nenhuma retirada da câmara fria registrada');
+  // por dia
+  const porDia = vdia.map(v => ({ rot: dataBR(v.data).slice(0, 5), v: Number(v.cabecas_dia), tip: `${dataBR(v.data)}: ${num(v.cabecas_dia)} cabeças · custo direto ${brl(v.custo_direto)} (${v.cabecas_dia ? 'R$ ' + num(v.custo_direto / v.cabecas_dia, 2) : '—'}/cabeça)` }));
+  const cpcDia = vdia.filter(v => Number(v.cabecas_dia) > 0).map(v => ({ rot: dataBR(v.data).slice(0, 5), v: v.custo_direto / v.cabecas_dia, tip: `${dataBR(v.data)}: R$ ${num(v.custo_direto / v.cabecas_dia, 2)} por cabeça de custo direto` }));
+  // rendimento por lote
+  const rendLotes = comPeso.filter(l => rendL(l) != null).map(l => ({ rot: `${l.codigo.slice(4, 8).replace(/(..)(..)/, '$2/$1')}-${l.codigo.slice(-2)} · ${nomeDe('cooperados', l.cooperado_id).trim().slice(0, 18)}`, v: rendL(l), alerta: foraFaixa(rendL(l)), cor: foraFaixa(rendL(l)) ? '#b4541a' : PN_VERDE,
+    tip: `${l.codigo}: ${num(kgLote(l.id), 0)} kg pesados ÷ ${num(l.peso_liquido_kg, 0)} kg vivos = ${num(rendL(l), 1)}%` }));
+  // produção por grupo e top produtos
+  const porProd = {}; pes.forEach(p => { porProd[p.produto] = (porProd[p.produto] || 0) + Number(p.peso_kg); });
+  const grupos = {}; Object.entries(porProd).forEach(([c, kg]) => { const g = pnGrupoProduto(c, nomeProduto(c)); grupos[g] = (grupos[g] || 0) + kg; });
+  const ordemG = ['Frango inteiro', 'Cortes a granel', 'Cortes em bandeja', 'Miúdos, pés e canja'];
+  const topProd = Object.entries(porProd).sort((x, y) => y[1] - x[1]).slice(0, 10).map(([c, kg]) => ({ rot: nomeProduto(c).slice(0, 30), v: kg, tip: `${nomeProduto(c)}: ${num(kg, 0)} kg (${num(100 * kg / producao, 1)}% da produção)` }));
+  // condenações
+  const porEnf = {}; conds.forEach(c => { porEnf[c.enfermidade] = (porEnf[c.enfermidade] || 0) + c.quantidade; });
+  const enf = Object.entries(porEnf).sort((x, y) => y[1] - x[1]).map(([e, n]) => ({ rot: e.slice(0, 28), v: n, tip: `${e}: ${num(n)} aves (${num(100 * n / Math.max(nAbat, 1), 2)}% das abatidas)` }));
+  // despesas por categoria
+  const porCat = cats.map(c => ({ rot: c.nome, v: soma(desp.filter(d => d.categoria_id === c.id), d => d.valor) })).filter(x => x.v > 0).sort((x, y) => y.v - x.v).map(x => ({ ...x, tip: `${x.rot}: ${brl(x.v)}` }));
+  // por cooperado
+  const coopIds = [...new Set(lotes.map(l => l.cooperado_id))];
+  const custoL = id => { const l = lotes.find(x => x.id === id); return l && l.custo_fechado != null ? Number(l.custo_fechado) : Number((vlote.find(v => v.lote_id === id) || {}).custo_lote || 0); };
+  const porCoop = coopIds.map(id => { const ls = lotes.filter(l => l.cooperado_id === id), cp = ls.filter(l => l.peso_liquido_kg > 0), val = cp.filter(l => rendL(l) != null && !foraFaixa(rendL(l)));
+    return { nome: nomeDe('cooperados', id).trim(), lotes: ls.length, aves: soma(ls, abatidas), pag: soma(ls, l => l.cabecas_pagantes), vivo: soma(cp, l => l.peso_liquido_kg), medio: soma(cp, l => l.peso_liquido_kg) / Math.max(soma(cp, recebidas), 1),
+      prod: soma(ls, l => kgLote(l.id)), rend: val.length ? 100 * soma(val, l => kgLote(l.id)) / soma(val, l => l.peso_liquido_kg) : null, cond: 100 * soma(ls, l => l.condenadas) / Math.max(soma(ls, abatidas), 1), custo: soma(ls, l => custoL(l.id)) }; })
+    .sort((x, y) => y.aves - x.aves);
+  const card = (titulo, corpo, sub = '') => `<section class="pn-card"><h3>${titulo}</h3>${sub ? `<p class="pn-sub">${sub}</p>` : ''}${corpo}</section>`;
+  const tile = (rot, val, sub = '', destaque = false) => `<div class="pn-tile${destaque ? ' pn-dest' : ''}"><small>${rot}</small><b>${val}</b>${sub ? `<span>${sub}</span>` : ''}</div>`;
+  const MES = MESES[D.m - 1].charAt(0) + MESES[D.m - 1].slice(1).toLowerCase();
+  return `<div class="pn${imprimir ? ' pn-print' : ''}">
+    <header class="pn-head"><img src="logo-copaf.jpg" alt="COPAF"><div><h2>Painel da operação · ${MES} de ${D.a}</h2><p>Abatedouro de aves · ${esc(st.ref.estab.razao_social || 'COPAF')}</p></div>
+      <div class="pn-emit">Emitido em ${new Date().toLocaleString('pt-BR')}</div></header>
+    ${pend.length ? `<div class="pn-aviso"><b>Números provisórios.</b> Pendências de lançamento: ${pend.join('; ')}.</div>` : ''}
+    <div class="pn-tiles">
+      ${tile('Aves abatidas', num(nAbat), `${num(lotes.length)} lotes · ${num(dias.length)} dias de abate`, true)}
+      ${tile('Peso vivo recebido', num(pesoVivo / 1000, 1) + ' t', `peso médio ${avesComPeso ? num(pesoVivo / avesComPeso, 2) : '—'} kg/ave`)}
+      ${tile('Produção pesada', num(producao / 1000, 1) + ' t', `${nAbat ? num(producao / nAbat, 2) : '—'} kg por ave abatida`)}
+      ${tile('Rendimento geral', pnPct(validos.length ? rendMes : null), `saída ÷ peso vivo · ${validos.length} lote(s) válidos`, true)}
+      ${tile('Mortalidade na chegada', pnPct(nAves ? 100 * nMortos / nAves : null, 2), `${num(nMortos)} aves`)}
+      ${tile('Condenação total (SIE)', pnPct(nAbat ? 100 * nCond / nAbat : null, 2), `${num(nCond)} aves`)}
+      ${tile('Custo operacional real', brl(cReal), `${nPag ? 'R$ ' + num(cReal / nPag, 2) : '—'} por cabeça · ${producao ? 'R$ ' + num(cReal / producao, 2) : '—'} por kg`, true)}
+      ${tile('Custo direto (cobrado nos dias)', brl(cDireto + cEstrCobr), `${nPag ? 'R$ ' + num((cDireto + cEstrCobr) / nPag, 2) : '—'} por cabeça`)}
+      ${tile('Produtividade', avesPorDiarista ? num(avesPorDiarista, 0) + ' aves' : '—', `por diarista-dia · ${num(diaristasDia)} diárias`)}
+      ${tile('Velocidade de abate', velocidade ? num(velocidade, 0) + ' aves/h' : '—', comHora.length ? `${comHora.length} lote(s) com horário completo` : 'horários não informados')}
+    </div>
+    <div class="pn-grid">
+      ${card('Aves abatidas por dia', pnBarrasV(porDia), 'Cabeças pagantes em cada dia de abate.')}
+      ${card('Custo direto por cabeça, por dia', pnBarrasV(cpcDia, { fmt: v => 'R$ ' + num(v, 2) }), 'Diaristas + energia + água + limpeza + outros, ÷ cabeças do dia. Quanto menor o volume do dia, maior o custo por ave.')}
+      ${card('Composição do custo operacional real', pnPilha([{ nome:'Diaristas', v:cDiar, cor:PN_SERIES[0] }, { nome:'Equipe fixa (mensalistas)', v:cMens, cor:PN_SERIES[1] }, { nome:'Despesas gerais', v:cDesp, cor:PN_SERIES[2] }, { nome:'Energia', v:cEn + eaE, cor:PN_SERIES[3] }, { nome:'Água', v:cAg + eaA, cor:PN_SERIES[4] }, { nome:'Limpeza e outros do dia', v:cLimp + cOut, cor:PN_SERIES[5] }]),
+        `Custos dos dias de abate + estrutura do mês (mensalistas e despesas)${cEA ? ` + ${brl(cEA)} de energia/água fora dos dias` : ''}.`)}
+      ${card('Rendimento geral por lote', pnBarrasH(rendLotes, { fmt: v => num(v, 0) + '%', faixa: FAIXA_REND, max: Math.max(100, ...rendLotes.map(r => Math.min(r.v, 120))) }), `Faixa verde: ${FAIXA_REND[0]}% a ${FAIXA_REND[1]}%. Lotes fora da faixa (⚠) indicam erro de lançamento e ficam fora do rendimento do mês.`)}
+      ${card('Mix de produção', pnPilha(ordemG.filter(g => grupos[g]).map((g, i) => ({ nome:g, v:grupos[g], cor:PN_SERIES[i] })), v => num(v, 0) + ' kg'), 'Quilos pesados na saída, por tipo de produto.')}
+      ${card('Produtos mais produzidos (kg)', pnBarrasH(topProd, { fmt: v => num(v, 0) + ' kg' }))}
+      ${card('Condenações totais por causa', pnBarrasH(enf, { fmt: v => num(v) + ' aves' }), `${num(nCond)} aves condenadas (${pnPct(nAbat ? 100 * nCond / nAbat : null, 2)} das abatidas).`)}
+      ${card('Despesas gerais por categoria', pnBarrasH(porCat, { fmt: v => brl(v) }), `${brl(soma(desp, d => d.valor))} lançados no menu Despesas no mês.`)}
+    </div>
+    ${card('Resultado por cooperado', `<div class="scroll"><table class="pn-tab"><tr><th>Cooperado</th><th class="n">Lotes</th><th class="n">Aves abatidas</th><th class="n">Peso vivo (kg)</th><th class="n">Peso médio</th><th class="n">Produção (kg)</th><th class="n">Rendimento</th><th class="n">Condenação</th><th class="n">Custo cobrado</th><th class="n">R$/cabeça</th></tr>
+      ${porCoop.map(c => `<tr><td>${esc(c.nome)}</td><td class="n">${c.lotes}</td><td class="n">${num(c.aves)}</td><td class="n">${c.vivo ? num(c.vivo, 0) : '—'}</td><td class="n">${c.vivo ? num(c.medio, 2) : '—'}</td><td class="n">${num(c.prod, 0)}</td><td class="n">${pnPct(c.rend)}</td><td class="n">${pnPct(c.cond, 2)}</td><td class="n">${brl(c.custo)}</td><td class="n">${c.pag ? num(c.custo / c.pag, 2) : '—'}</td></tr>`).join('')}
+      <tr class="pn-tot"><td>Total</td><td class="n">${lotes.length}</td><td class="n">${num(nAbat)}</td><td class="n">${num(pesoVivo, 0)}</td><td class="n">${avesComPeso ? num(pesoVivo / avesComPeso, 2) : '—'}</td><td class="n">${num(producao, 0)}</td><td class="n">${pnPct(validos.length ? rendMes : null)}</td><td class="n">${pnPct(nAbat ? 100 * nCond / nAbat : null, 2)}</td><td class="n">${brl(soma(coopIds, id => soma(lotes.filter(l => l.cooperado_id === id), l => custoL(l.id))))}</td><td></td></tr></table></div>`,
+      '“Custo cobrado” é o que foi atribuído aos lotes nos dias de abate. A diferença para o custo operacional real é recuperada pela taxa de estrutura do mês seguinte.')}
+    <div class="pn-grid">
+      ${card('Estrutura do mês e taxa para o mês seguinte', `<table class="pn-leg"><tr><td>Equipe fixa (mensalistas)</td><td class="n">${brl(cMens)}</td></tr><tr><td>Despesas gerais (entram na taxa)</td><td class="n">${brl(cDesp)}</td></tr>
+        <tr><td>Energia e água fora dos dias de abate</td><td class="n">${comp && (comp.energia_conta_valor != null || comp.agua_conta_valor != null) ? brl(cEA) : 'contas não lançadas'}</td></tr><tr><td><b>Estrutura do mês</b></td><td class="n"><b>${brl(cEstr)}</b></td></tr>
+        <tr><td>Já cobrada nos lotes do mês</td><td class="n">${brl(cEstrCobr)}</td></tr><tr><td><b>Taxa prevista para o mês seguinte</b></td><td class="n"><b>${nPag ? 'R$ ' + num(Math.max(cEstr + Number(comp && comp.alvo_estrutura || 0) - cEstrCobr, 0) / nPag, 4) + ' / cabeça' : '—'}</b></td></tr></table>`)}
+      ${card('Câmara fria e embalagens', `<table class="pn-leg"><tr><td>Produto em estoque na câmara (todos os meses)</td><td class="n">${num(soma(D.camara, x => x.saldo_kg), 0)} kg</td></tr>
+        <tr><td>Retiradas registradas no mês</td><td class="n">${D.exps.length} · ${num(soma(D.expIt, x => x.peso_kg), 0)} kg</td></tr>
+        <tr><td>Embalagens consumidas nos lotes</td><td class="n">${num(soma(D.embm, x => x.quantidade))}</td></tr>
+        <tr><td>Caixa interno: aportes no mês</td><td class="n">${brl(soma(D.cx.filter(x => x.data >= D.mes + '-01' && x.data.slice(0, 7) === D.mes && x.tipo === 'aporte'), x => x.valor))}</td></tr>
+        <tr><td>Caixa interno: despesas pagas pelo caixa no mês</td><td class="n">${brl(soma(desp.filter(d => d.fonte === 'caixa'), d => d.valor))}</td></tr></table>`)}
+    </div>
+    <p class="pn-nota">Definições: aves abatidas = recebidas − mortas na chegada; cabeças pagantes = abatidas − condenadas; rendimento geral = kg pesados na saída ÷ kg vivos recebidos (só lotes com pesagem de entrada e dentro da faixa); custo operacional real = custo direto dos dias + mensalistas + despesas gerais + energia/água fora dos dias; produtividade = aves abatidas ÷ diárias pagas.</p>
+  </div>`;
+}
+
+async function telaPainel() {
+  const mes = st.pnMes = st.pnMes || hoje().slice(0, 7);
+  main.innerHTML = `<div class="card row"><label>Mês <input type="month" id="pMes" value="${mes}"></label><button class="b" id="bPnImp">Imprimir / PDF para a diretoria</button><span class="mut">Os números se atualizam sozinhos conforme os lançamentos.</span></div><div id="pnCorpo"><p class="mut">Carregando…</p></div><div id="pnTipBox" class="pn-tipbox" hidden></div>`;
+  $('#pMes').onchange = e => { st.pnMes = e.target.value; render(); };
+  const D = await dadosPainel(mes);
+  $('#pnCorpo').innerHTML = htmlPainel(D);
+  $('#bPnImp').onclick = () => { $('#rel').innerHTML = htmlPainel(D, true); imprimir('@page { size:A4 landscape; margin:8mm }', 'pn-rel'); };
+  const box = $('#pnTipBox');
+  main.onmousemove = e => { const g = e.target.closest('[data-tip]'); if (!g) { box.hidden = true; return; } box.textContent = g.dataset.tip; box.hidden = false; box.style.left = (e.clientX + 14) + 'px'; box.style.top = (e.clientY + 14) + 'px'; };
+  main.onmouseleave = () => { box.hidden = true; };
+}
+
 // ───────── FECHAMENTO MENSAL ─────────
 const F_CONTAS = [
   { k:'energia_conta_kwh', label:'Conta de energia (kWh)', type:'number' }, { k:'energia_conta_valor', label:'Conta de energia (R$)', type:'number' },
@@ -1275,8 +1485,8 @@ async function telaUsuarios() {
 // ───────── navegação e sessão ─────────
 async function render() {
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === st.tab));
-  main.onclick = null; main.onchange = null;
-  try { await ({ dia:telaDia, mes:telaMes, cam:telaCam, sie:telaSie, emb:telaEmb, desp:telaDesp, cad:telaCad, usu:telaUsuarios })[st.tab](); }
+  main.onclick = null; main.onchange = null; main.onmousemove = null; main.onmouseleave = null;
+  try { await ({ dia:telaDia, painel:telaPainel, mes:telaMes, cam:telaCam, sie:telaSie, emb:telaEmb, desp:telaDesp, cad:telaCad, usu:telaUsuarios })[st.tab](); }
   catch (e) { main.innerHTML = `<div class="card"><p class="msg">Erro ao carregar: ${esc(e.message)}</p></div>`; }
 }
 $('#nav').onclick = e => { if (e.target.dataset.tab) { st.tab = e.target.dataset.tab; render(); } };
