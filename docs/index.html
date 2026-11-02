@@ -792,7 +792,7 @@ const pnTip = t => ` data-tip="${esc(t)}"`;
 // barras verticais, uma série
 function pnBarrasV(dados, { fmt = v => num(v), alt = 170 } = {}) {
   if (!dados.length) return '<p class="mut">Sem dados no período.</p>';
-  const W = 640, H = alt, pe = 34, pb = 26, pt = 14, larg = (W - pe - 8) / dados.length, max = Math.max(...dados.map(d => d.v), 1);
+  const W = 640, H = alt, pe = 56, pb = 26, pt = 14, larg = (W - pe - 8) / dados.length, max = Math.max(...dados.map(d => d.v), 1);
   const y = v => pt + (H - pt - pb) * (1 - v / max), bw = Math.min(46, larg * 0.62);
   const grade = [0, 0.5, 1].map(f => `<line x1="${pe}" x2="${W - 4}" y1="${y(max * f)}" y2="${y(max * f)}" stroke="#e4e6e1"/><text x="${pe - 6}" y="${y(max * f) + 4}" text-anchor="end" class="pn-ax">${fmt(max * f)}</text>`).join('');
   const barras = dados.map((d, i) => { const x = pe + i * larg + (larg - bw) / 2, h = Math.max(0, H - pb - y(d.v));
@@ -805,7 +805,7 @@ function pnBarrasV(dados, { fmt = v => num(v), alt = 170 } = {}) {
 // barras horizontais; faixa opcional [min,max] desenhada como referência
 function pnBarrasH(dados, { fmt = v => num(v), faixa = null, max = null } = {}) {
   if (!dados.length) return '<p class="mut">Sem dados no período.</p>';
-  const lin = 26, W = 640, pe = 190, pd = 70, H = dados.length * lin + (faixa ? 22 : 6), mx = max || Math.max(...dados.map(d => d.v), faixa ? faixa[1] : 0, 1);
+  const lin = 26, W = 640, pe = 250, pd = 74, H = dados.length * lin + (faixa ? 22 : 6), mx = max || Math.max(...dados.map(d => d.v), faixa ? faixa[1] : 0, 1);
   const x = v => pe + (W - pe - pd) * Math.min(v, mx) / mx;
   const ref = faixa ? `<rect x="${x(faixa[0])}" y="2" width="${x(faixa[1]) - x(faixa[0])}" height="${dados.length * lin}" fill="#e5f4eb"/>
     <text x="${x(faixa[0])}" y="${dados.length * lin + 16}" class="pn-ax" text-anchor="middle">${fmt(faixa[0])}</text><text x="${x(faixa[1])}" y="${dados.length * lin + 16}" class="pn-ax" text-anchor="middle">${fmt(faixa[1])}</text>` : '';
@@ -892,13 +892,13 @@ function htmlPainel(D, imprimir = false) {
   const porDia = vdia.map(v => ({ rot: dataBR(v.data).slice(0, 5), v: Number(v.cabecas_dia), tip: `${dataBR(v.data)}: ${num(v.cabecas_dia)} cabeças · custo direto ${brl(v.custo_direto)} (${v.cabecas_dia ? 'R$ ' + num(v.custo_direto / v.cabecas_dia, 2) : '—'}/cabeça)` }));
   const cpcDia = vdia.filter(v => Number(v.cabecas_dia) > 0).map(v => ({ rot: dataBR(v.data).slice(0, 5), v: v.custo_direto / v.cabecas_dia, tip: `${dataBR(v.data)}: R$ ${num(v.custo_direto / v.cabecas_dia, 2)} por cabeça de custo direto` }));
   // rendimento por lote
-  const rendLotes = comPeso.filter(l => rendL(l) != null).map(l => ({ rot: `${l.codigo.slice(4, 8).replace(/(..)(..)/, '$2/$1')}-${l.codigo.slice(-2)} · ${nomeDe('cooperados', l.cooperado_id).trim().slice(0, 18)}`, v: rendL(l), alerta: foraFaixa(rendL(l)), cor: foraFaixa(rendL(l)) ? '#b4541a' : PN_VERDE,
+  const rendLotes = comPeso.filter(l => rendL(l) != null).map(l => ({ rot: `${l.codigo.slice(4, 8).replace(/(..)(..)/, '$2/$1')}-${l.codigo.slice(-2)} · ${nomeDe('cooperados', l.cooperado_id).trim().slice(0, 24)}`, v: rendL(l), alerta: foraFaixa(rendL(l)), cor: foraFaixa(rendL(l)) ? '#b4541a' : PN_VERDE,
     tip: `${l.codigo}: ${num(kgLote(l.id), 0)} kg pesados ÷ ${num(l.peso_liquido_kg, 0)} kg vivos = ${num(rendL(l), 1)}%` }));
   // produção por grupo e top produtos
   const porProd = {}; pes.forEach(p => { porProd[p.produto] = (porProd[p.produto] || 0) + Number(p.peso_kg); });
   const grupos = {}; Object.entries(porProd).forEach(([c, kg]) => { const g = pnGrupoProduto(c, nomeProduto(c)); grupos[g] = (grupos[g] || 0) + kg; });
   const ordemG = ['Frango inteiro', 'Cortes a granel', 'Cortes em bandeja', 'Miúdos, pés e canja'];
-  const topProd = Object.entries(porProd).sort((x, y) => y[1] - x[1]).slice(0, 10).map(([c, kg]) => ({ rot: nomeProduto(c).slice(0, 30), v: kg, tip: `${nomeProduto(c)}: ${num(kg, 0)} kg (${num(100 * kg / producao, 1)}% da produção)` }));
+  const topProd = Object.entries(porProd).sort((x, y) => y[1] - x[1]).slice(0, 10).map(([c, kg]) => ({ rot: nomeProduto(c).length > 34 ? nomeProduto(c).slice(0, 33) + '…' : nomeProduto(c), v: kg, tip: `${nomeProduto(c)}: ${num(kg, 0)} kg (${num(100 * kg / producao, 1)}% da produção)` }));
   // condenações
   const porEnf = {}; conds.forEach(c => { porEnf[c.enfermidade] = (porEnf[c.enfermidade] || 0) + c.quantidade; });
   const enf = Object.entries(porEnf).sort((x, y) => y[1] - x[1]).map(([e, n]) => ({ rot: e.slice(0, 28), v: n, tip: `${e}: ${num(n)} aves (${num(100 * n / Math.max(nAbat, 1), 2)}% das abatidas)` }));
