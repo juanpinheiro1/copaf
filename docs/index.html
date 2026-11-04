@@ -71,7 +71,7 @@
     #rel.pn-rel { padding:0 1.5mm; } #rel .pn-head h2 { border:0; margin:0; padding:0; font-size:17px; } #rel .pn-tile, #rel .pn-card, #rel .pn-head { border-color:#ccc; } #rel .pn { gap:8px; } #rel .pn-grid { gap:8px; } #rel .pn-card { padding:8px 12px; } #rel .pn-tab td, #rel .pn-tab th { padding:3px 5px; font-size:11px; }
     #rel .cab { font-size:11px; line-height:1.4; } #rel .cab b { font-size:12px; }
     #rel .gov { text-align:center; font-size:10px; line-height:1.35; } #rel h3 { text-align:center; font-size:13px; margin:14px 0 8px; }
-    #rel table.gr td, #rel table.gr th { border:1px solid #000; padding:3px 5px; font-size:11px; white-space:normal; } #rel table.gr th { background:#d9e6c3; }
+    #rel table.gr td, #rel table.gr th { border:1px solid #000; padding:3px 5px; font-size:11px; white-space:normal; } #rel table.gr th { background:#d9e6c3; color:#000; }
     #rel h1 { font-size:18px; margin:0; } #rel h2 { font-size:13px; margin:18px 0 6px; border-bottom:1px solid #000; padding-bottom:3px; }
     #rel td, #rel th { border-bottom:1px solid #bbb; padding:4px 6px; }
     /* a etiqueta não herda o espaçamento das tabelas de relatório */
@@ -1358,7 +1358,7 @@ async function telaSie() {
       ABATEDOURO DE AVES - REGISTRO NO SIE Nº ${esc(E.registro_sie)}<br>ENDEREÇO: ${esc((E.endereco || '').toUpperCase())}</div></div>
     <h3>MAPA DE ABATE - ${MESES[m - 1]}/${a}</h3>
     <table class="gr">${cabMapa}${linhasMapa}<tr><td colspan="4" style="border:0"></td><th>TOTAL</th><th class="n">${num(total)}</th></tr></table>
-    <p style="margin-top:40px;font-size:12px;line-height:1.5"><b>${esc((E.rt_nome || '').toUpperCase())}</b><br>${esc((E.rt_titulo || '').toUpperCase())}<br>CRMV ${esc(E.rt_crmv)}</p>`; imprimir('', '', false); };
+    <p style="margin-top:50px;font-size:12px;line-height:1.5">_______________________________________<br><b>${esc((E.rt_nome || '').toUpperCase())}</b><br>${esc((E.rt_titulo || '').toUpperCase())}<br>CRMV ${esc(E.rt_crmv)}</p>`; imprimir('', '', false); };
   $('#bOcorr').onclick = () => { $('#rel').innerHTML = `
     <div class="gov"><b>GOVERNO DA PARAÍBA</b><br>SECRETARIA DE ESTADO DO DESENVOLVIMENTO DA AGROPECUÁRIA E DA PESCA<br>GERÊNCIA EXECUTIVA DE DEFESA AGROPECUÁRIA<br>GERÊNCIA OPERACIONAL DE DEFESA ANIMAL<br>COORDENAÇÃO DE EPIDEMIOLOGIA E ANÁLISE DE RISCO</div>
     <h3>OCORRÊNCIAS SANITÁRIAS EM ESTABELECIMENTOS DE ABATE - CONDENSADO MENSAL</h3>
