@@ -63,11 +63,12 @@
   .sobre ul { margin:6px 0 0; padding-left:20px; } .sobre li { margin:3px 0; }
   .avm-rod { display:none; }
   @media print {
-    header, main { display:none !important; }
+    body > header, main { display:none !important; }
     #rel { display:block; padding:0 8mm; color:#000; }
     #rel .avm-rod { display:block; margin:14px 0 0; font-size:9px; color:#555; text-align:right; }
     #rel.etqs { padding:0; }
-    #rel.pn-rel { padding:0; } #rel .pn-tile, #rel .pn-card, #rel .pn-head { border-color:#ccc; } #rel .pn { gap:8px; } #rel .pn-grid { gap:8px; } #rel .pn-card { padding:8px 12px; } #rel .pn-tab td, #rel .pn-tab th { padding:3px 5px; font-size:11px; }
+    #rel .pn-tiles { grid-template-columns:repeat(6, minmax(0,1fr)) !important; } #rel .pn-grid { grid-template-columns:repeat(2, minmax(0,1fr)) !important; } #rel .pn-card h3 { text-align:left; margin:0 0 4px; font-size:14px; } #rel .pn-tile b { font-size:18px; }
+    #rel.pn-rel { padding:0 1.5mm; } #rel .pn-head h2 { border:0; margin:0; padding:0; font-size:17px; } #rel .pn-tile, #rel .pn-card, #rel .pn-head { border-color:#ccc; } #rel .pn { gap:8px; } #rel .pn-grid { gap:8px; } #rel .pn-card { padding:8px 12px; } #rel .pn-tab td, #rel .pn-tab th { padding:3px 5px; font-size:11px; }
     #rel .cab { font-size:11px; line-height:1.4; } #rel .cab b { font-size:12px; }
     #rel .gov { text-align:center; font-size:10px; line-height:1.35; } #rel h3 { text-align:center; font-size:13px; margin:14px 0 8px; }
     #rel table.gr td, #rel table.gr th { border:1px solid #000; padding:3px 5px; font-size:11px; white-space:normal; } #rel table.gr th { background:#d9e6c3; }
