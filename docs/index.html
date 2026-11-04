@@ -109,7 +109,7 @@
   .pn-head img { height:56px; } .pn-head h2 { margin:0; font-size:19px; } .pn-head p { margin:2px 0 0; color:var(--mut); font-size:13px; }
   .pn-emit { margin-left:auto; color:var(--mut); font-size:12px; }
   .pn-aviso { background:#fff6e9; border:1px solid #f0c48a; color:#7a3d0c; border-radius:10px; padding:10px 14px; font-size:13px; }
-  .pn-tiles { display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:10px; }
+  .pn-tiles { display:grid; grid-template-columns:repeat(6, minmax(0,1fr)); gap:10px; }
   .pn-tile { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:2px; }
   .pn-tile small { color:var(--mut); font-size:11.5px; } .pn-tile b { font-size:21px; font-variant-numeric:tabular-nums; color:var(--ink); } .pn-tile span { color:var(--mut); font-size:11.5px; }
   .pn-tile.pn-dest { border-left:4px solid var(--pri); }
@@ -888,7 +888,9 @@ function htmlPainel(D, imprimir = false) {
   const fixos = st.ref.funcionarios.filter(f => f.vinculo === 'fixo' && f.ativo !== false), cMens = comp && comp.fechada && comp.est_mensalistas != null ? Number(comp.est_mensalistas) : soma(fixos, f => f.salario_mensal);
   const catRat = id => (cats.find(c => c.id === id) || {}).rateia, cDesp = soma(desp.filter(d => catRat(d.categoria_id)), d => d.valor);
   const eaE = comp && comp.energia_conta_valor != null ? comp.energia_conta_valor - cEn : 0, eaA = comp && comp.agua_conta_valor != null ? comp.agua_conta_valor - cAg : 0, cEA = eaE + eaA;
-  const cEstr = cMens + cDesp + cEA, cReal = cDireto + cEstr;
+  const cEstr = cMens + cDesp + cEA, cReal = cDireto + cEstr, cCobr = cDireto + cEstrCobr;
+  // custo por kg de ave abatida (peso vivo) = custo por ave abatida ÷ peso médio; lotes sem pesagem de entrada entram pelo peso médio
+  const kgAve = soma(comPeso, abatidas) ? pesoVivo / soma(comPeso, abatidas) : null, porKgVivo = c => kgAve && nAbat ? c / nAbat / kgAve : null;
   const diaristasDia = diar.length, avesPorDiarista = diaristasDia ? nAbat / diaristasDia : null;
   // velocidade (lotes com início e término coerentes)
   const hrs = l => { if (!l.hora_inicio || !l.hora_termino) return null; const [h1, m1] = l.hora_inicio.split(':').map(Number), [h2, m2] = l.hora_termino.split(':').map(Number); const min = h2 * 60 + m2 - (h1 * 60 + m1) - (l.minutos_parada || 0); return min > 10 ? min / 60 : null; };
@@ -923,7 +925,7 @@ function htmlPainel(D, imprimir = false) {
   const custoL = id => { const l = lotes.find(x => x.id === id); return l && l.custo_fechado != null ? Number(l.custo_fechado) : Number((vlote.find(v => v.lote_id === id) || {}).custo_lote || 0); };
   const porCoop = coopIds.map(id => { const ls = lotes.filter(l => l.cooperado_id === id), cp = ls.filter(l => l.peso_liquido_kg > 0), val = cp.filter(l => rendL(l) != null && !foraFaixa(rendL(l)));
     return { nome: nomeDe('cooperados', id).trim(), lotes: ls.length, aves: soma(ls, abatidas), pag: soma(ls, l => l.cabecas_pagantes), vivo: soma(cp, l => l.peso_liquido_kg), medio: soma(cp, l => l.peso_liquido_kg) / Math.max(soma(cp, recebidas), 1),
-      prod: soma(ls, l => kgLote(l.id)), rend: val.length ? 100 * soma(val, l => kgLote(l.id)) / soma(val, l => l.peso_liquido_kg) : null, cond: 100 * soma(ls, l => l.condenadas) / Math.max(soma(ls, abatidas), 1), custo: soma(ls, l => custoL(l.id)) }; })
+      prod: soma(ls, l => kgLote(l.id)), custoVivo: soma(cp, l => custoL(l.id)), rend: val.length ? 100 * soma(val, l => kgLote(l.id)) / soma(val, l => l.peso_liquido_kg) : null, cond: 100 * soma(ls, l => l.condenadas) / Math.max(soma(ls, abatidas), 1), custo: soma(ls, l => custoL(l.id)) }; })
     .sort((x, y) => y.aves - x.aves);
   const card = (titulo, corpo, sub = '') => `<section class="pn-card"><h3>${titulo}</h3>${sub ? `<p class="pn-sub">${sub}</p>` : ''}${corpo}</section>`;
   const tile = (rot, val, sub = '', destaque = false) => `<div class="pn-tile${destaque ? ' pn-dest' : ''}"><small>${rot}</small><b>${val}</b>${sub ? `<span>${sub}</span>` : ''}</div>`;
@@ -939,8 +941,10 @@ function htmlPainel(D, imprimir = false) {
       ${tile('Rendimento geral', pnPct(validos.length ? rendMes : null), `saída ÷ peso vivo · ${validos.length} lote(s) válidos`, true)}
       ${tile('Mortalidade na chegada', pnPct(nAves ? 100 * nMortos / nAves : null, 2), `${num(nMortos)} aves`)}
       ${tile('Condenação total (SIE)', pnPct(nAbat ? 100 * nCond / nAbat : null, 2), `${num(nCond)} aves`)}
-      ${tile('Custo operacional real', brl(cReal), `${nPag ? 'R$ ' + num(cReal / nPag, 2) : '—'} por cabeça · ${producao ? 'R$ ' + num(cReal / producao, 2) : '—'} por kg`, true)}
-      ${tile('Custo direto (cobrado nos dias)', brl(cDireto + cEstrCobr), `${nPag ? 'R$ ' + num((cDireto + cEstrCobr) / nPag, 2) : '—'} por cabeça`)}
+      ${tile('Custo operacional real', brl(cReal), `${nPag ? 'R$ ' + num(cReal / nPag, 2) : '—'} por cabeça`, true)}
+      ${tile('Custo por kg de ave abatida', porKgVivo(cReal) == null ? '—' : 'R$ ' + num(porKgVivo(cReal), 2), `real, por kg vivo · cobrado ${porKgVivo(cCobr) == null ? '—' : 'R$ ' + num(porKgVivo(cCobr), 2)}/kg`, true)}
+      ${tile('Custo por kg produzido', producao ? 'R$ ' + num(cReal / producao, 2) : '—', 'custo real ÷ kg pesados na saída')}
+      ${tile('Custo cobrado nos lotes', brl(cCobr), `${nPag ? 'R$ ' + num(cCobr / nPag, 2) : '—'} por cabeça`)}
       ${tile('Produtividade', avesPorDiarista ? num(avesPorDiarista, 0) + ' aves' : '—', `por diarista-dia · ${num(diaristasDia)} diárias`)}
       ${tile('Velocidade de abate', velocidade ? num(velocidade, 0) + ' aves/h' : '—', comHora.length ? `${comHora.length} lote(s) com horário completo` : 'horários não informados')}
     </div>
@@ -955,9 +959,9 @@ function htmlPainel(D, imprimir = false) {
       ${card('Condenações totais por causa', pnBarrasH(enf, { fmt: v => num(v) + ' aves' }), `${num(nCond)} aves condenadas (${pnPct(nAbat ? 100 * nCond / nAbat : null, 2)} das abatidas).`)}
       ${card('Despesas gerais por categoria', pnBarrasH(porCat, { fmt: v => brl(v) }), `${brl(soma(desp, d => d.valor))} lançados no menu Despesas no mês.`)}
     </div>
-    ${card('Resultado por cooperado', `<div class="scroll"><table class="pn-tab"><tr><th>Cooperado</th><th class="n">Lotes</th><th class="n">Aves abatidas</th><th class="n">Peso vivo (kg)</th><th class="n">Peso médio</th><th class="n">Produção (kg)</th><th class="n">Rendimento</th><th class="n">Condenação</th><th class="n">Custo cobrado</th><th class="n">R$/cabeça</th></tr>
-      ${porCoop.map(c => `<tr><td>${esc(c.nome)}</td><td class="n">${c.lotes}</td><td class="n">${num(c.aves)}</td><td class="n">${c.vivo ? num(c.vivo, 0) : '—'}</td><td class="n">${c.vivo ? num(c.medio, 2) : '—'}</td><td class="n">${num(c.prod, 0)}</td><td class="n">${pnPct(c.rend)}</td><td class="n">${pnPct(c.cond, 2)}</td><td class="n">${brl(c.custo)}</td><td class="n">${c.pag ? num(c.custo / c.pag, 2) : '—'}</td></tr>`).join('')}
-      <tr class="pn-tot"><td>Total</td><td class="n">${lotes.length}</td><td class="n">${num(nAbat)}</td><td class="n">${num(pesoVivo, 0)}</td><td class="n">${avesComPeso ? num(pesoVivo / avesComPeso, 2) : '—'}</td><td class="n">${num(producao, 0)}</td><td class="n">${pnPct(validos.length ? rendMes : null)}</td><td class="n">${pnPct(nAbat ? 100 * nCond / nAbat : null, 2)}</td><td class="n">${brl(soma(coopIds, id => soma(lotes.filter(l => l.cooperado_id === id), l => custoL(l.id))))}</td><td></td></tr></table></div>`,
+    ${card('Resultado por cooperado', `<div class="scroll"><table class="pn-tab"><tr><th>Cooperado</th><th class="n">Lotes</th><th class="n">Aves abatidas</th><th class="n">Peso vivo (kg)</th><th class="n">Peso médio</th><th class="n">Produção (kg)</th><th class="n">Rendimento</th><th class="n">Condenação</th><th class="n">Custo cobrado</th><th class="n">R$/cabeça</th><th class="n">R$/kg vivo</th></tr>
+      ${porCoop.map(c => `<tr><td>${esc(c.nome)}</td><td class="n">${c.lotes}</td><td class="n">${num(c.aves)}</td><td class="n">${c.vivo ? num(c.vivo, 0) : '—'}</td><td class="n">${c.vivo ? num(c.medio, 2) : '—'}</td><td class="n">${num(c.prod, 0)}</td><td class="n">${pnPct(c.rend)}</td><td class="n">${pnPct(c.cond, 2)}</td><td class="n">${brl(c.custo)}</td><td class="n">${c.pag ? num(c.custo / c.pag, 2) : '—'}</td><td class="n">${c.vivo ? num(c.custoVivo / c.vivo, 2) : '—'}</td></tr>`).join('')}
+      <tr class="pn-tot"><td>Total</td><td class="n">${lotes.length}</td><td class="n">${num(nAbat)}</td><td class="n">${num(pesoVivo, 0)}</td><td class="n">${avesComPeso ? num(pesoVivo / avesComPeso, 2) : '—'}</td><td class="n">${num(producao, 0)}</td><td class="n">${pnPct(validos.length ? rendMes : null)}</td><td class="n">${pnPct(nAbat ? 100 * nCond / nAbat : null, 2)}</td><td class="n">${brl(soma(coopIds, id => soma(lotes.filter(l => l.cooperado_id === id), l => custoL(l.id))))}</td><td></td><td class="n">${porKgVivo(cCobr) == null ? '—' : num(porKgVivo(cCobr), 2)}</td></tr></table></div>`,
       '“Custo cobrado” é o que foi atribuído aos lotes nos dias de abate. A diferença para o custo operacional real é recuperada pela taxa de estrutura do mês seguinte.')}
     <div class="pn-grid">
       ${card('Estrutura do mês e taxa para o mês seguinte', `<table class="pn-leg"><tr><td>Equipe fixa (mensalistas)</td><td class="n">${brl(cMens)}</td></tr><tr><td>Despesas gerais (entram na taxa)</td><td class="n">${brl(cDesp)}</td></tr>
@@ -969,7 +973,7 @@ function htmlPainel(D, imprimir = false) {
         <tr><td>Caixa interno: aportes no mês</td><td class="n">${brl(soma(D.cx.filter(x => x.data >= D.mes + '-01' && x.data.slice(0, 7) === D.mes && x.tipo === 'aporte'), x => x.valor))}</td></tr>
         <tr><td>Caixa interno: despesas pagas pelo caixa no mês</td><td class="n">${brl(soma(desp.filter(d => d.fonte === 'caixa'), d => d.valor))}</td></tr></table>`)}
     </div>
-    <p class="pn-nota">Definições: aves abatidas = recebidas − mortas na chegada; cabeças pagantes = abatidas − condenadas; rendimento geral = kg pesados na saída ÷ kg vivos recebidos (só lotes com pesagem de entrada e dentro da faixa); custo operacional real = custo direto dos dias + mensalistas + despesas gerais + energia/água fora dos dias; produtividade = aves abatidas ÷ diárias pagas.</p>
+    <p class="pn-nota">Definições: aves abatidas = recebidas − mortas na chegada; cabeças pagantes = abatidas − condenadas; rendimento geral = kg pesados na saída ÷ kg vivos recebidos (só lotes com pesagem de entrada e dentro da faixa); custo operacional real = custo direto dos dias + mensalistas + despesas gerais + energia/água fora dos dias; custo por kg de ave abatida = custo por ave abatida ÷ peso vivo médio por ave (lotes com pesagem de entrada); custo por kg produzido = custo real ÷ kg pesados na saída; produtividade = aves abatidas ÷ diárias pagas.</p>
   </div>`;
 }
 
