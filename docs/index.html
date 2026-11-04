@@ -108,6 +108,7 @@
   .pn-head { display:flex; align-items:center; gap:16px; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 16px; }
   .pn-head img { height:56px; } .pn-head h2 { margin:0; font-size:19px; } .pn-head p { margin:2px 0 0; color:var(--mut); font-size:13px; }
   .pn-emit { margin-left:auto; color:var(--mut); font-size:12px; }
+  .pn-ok { background:var(--pri2); border:1px solid #b9dfc8; color:#0b5a2c; border-radius:10px; padding:10px 14px; font-size:13px; }
   .pn-aviso { background:#fff6e9; border:1px solid #f0c48a; color:#7a3d0c; border-radius:10px; padding:10px 14px; font-size:13px; }
   .pn-tiles { display:grid; grid-template-columns:repeat(6, minmax(0,1fr)); gap:10px; }
   .pn-tile { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:2px; }
@@ -901,9 +902,12 @@ function htmlPainel(D, imprimir = false) {
   const da = dias.filter(d => !d.fechado).length; if (da) pend.push(`${da} de ${dias.length} dias de produção abertos`);
   const sp = lotes.filter(l => !kgLote(l.id)).length; if (sp) pend.push(`${sp} lote(s) sem pesagem de saída`);
   if (foraLotes.length) pend.push(`${foraLotes.length} lote(s) com rendimento fora da faixa de ${FAIXA_REND[0]}% a ${FAIXA_REND[1]}% (fora do cálculo do rendimento do mês)`);
-  if (!comp || comp.taxa_estrutura == null) pend.push('taxa de estrutura do mês não aplicada aos lotes');
-  if (!comp || (comp.energia_conta_valor == null && comp.agua_conta_valor == null)) pend.push('contas reais de energia e água não lançadas');
-  if (!D.exps.length && producao) pend.push('nenhuma retirada da câmara fria registrada');
+  // observações: não impedem o fechamento, mas a diretoria precisa saber
+  const obs = [];
+  if (!comp || comp.taxa_estrutura == null) obs.push('o mês não teve taxa de estrutura: os lotes pagaram só o custo direto, e a estrutura do mês é recuperada pela taxa do mês seguinte');
+  if (!comp || (comp.energia_conta_valor == null && comp.agua_conta_valor == null)) obs.push('energia e água pelo consumo estimado nos dias de abate (contas reais não lançadas)');
+  if (!D.exps.length && producao) obs.push('câmara fria sem retiradas registradas');
+  const fechado = comp && comp.fechada;
   // por dia
   const porDia = vdia.map(v => ({ rot: dataBR(v.data).slice(0, 5), v: Number(v.cabecas_dia), tip: `${dataBR(v.data)}: ${num(v.cabecas_dia)} cabeças · custo direto ${brl(v.custo_direto)} (${v.cabecas_dia ? 'R$ ' + num(v.custo_direto / v.cabecas_dia, 2) : '—'}/cabeça)` }));
   const cpcDia = vdia.filter(v => Number(v.cabecas_dia) > 0).map(v => ({ rot: dataBR(v.data).slice(0, 5), v: v.custo_direto / v.cabecas_dia, tip: `${dataBR(v.data)}: R$ ${num(v.custo_direto / v.cabecas_dia, 2)} por cabeça de custo direto` }));
@@ -933,7 +937,8 @@ function htmlPainel(D, imprimir = false) {
   return `<div class="pn${imprimir ? ' pn-print' : ''}">
     <header class="pn-head"><img src="logo-copaf.jpg" alt="COPAF"><div><h2>Painel da operação · ${MES} de ${D.a}</h2><p>Abatedouro de aves · ${esc(st.ref.estab.razao_social || 'COPAF')}</p></div>
       <div class="pn-emit">Emitido em ${new Date().toLocaleString('pt-BR')}</div></header>
-    ${pend.length ? `<div class="pn-aviso"><b>Números provisórios.</b> Pendências de lançamento: ${pend.join('; ')}.</div>` : ''}
+    ${pend.length || !fechado ? `<div class="pn-aviso"><b>Números provisórios.</b> ${pend.length ? `Pendências de lançamento: ${pend.join('; ')}.` : 'O mês ainda não foi fechado.'}${obs.length ? ` Observações: ${obs.join('; ')}.` : ''}</div>`
+      : `<div class="pn-ok"><b>Mês fechado.</b>${obs.length ? ` Observações: ${obs.join('; ')}.` : ''}</div>`}
     <div class="pn-tiles">
       ${tile('Aves abatidas', num(nAbat), `${num(lotes.length)} lotes · ${num(dias.length)} dias de abate`, true)}
       ${tile('Peso vivo recebido', num(pesoVivo / 1000, 1) + ' t', `peso médio ${avesComPeso ? num(pesoVivo / avesComPeso, 2) : '—'} kg/ave`)}
