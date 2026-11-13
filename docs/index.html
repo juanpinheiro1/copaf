@@ -341,15 +341,15 @@ function listaSaida(pesagens) {
   usados.sort((a, b) => (fr[b.codigo] || 0) - (fr[a.codigo] || 0) || a.ordem - b.ordem);
   return { linhas:[...usados, ...outros].map(p => ({ codigo:p.codigo, nome:p.nome, real:real[p.codigo] ?? null, frequente:usados.includes(p) })), total:Object.values(real).reduce((a, x) => a + x, 0) };
 }
-function tabelaSaida(l, pesagens, editavel = false) {
+function tabelaSaida(l, pesagens, editavel = false, rg = null) {
   const { linhas, total } = listaSaida(pesagens), mostrar = editavel ? linhas : linhas.filter(x => x.real != null);
   if (!mostrar.length) return '';
-  const r = rendGeral(l, total), sep = editavel && linhas.some(x => !x.frequente) && linhas.some(x => x.frequente) ? linhas.findIndex(x => !x.frequente) : -1;
+  const r = rg && rg.r !== undefined ? rg.r : rendGeral(l, total), sep = editavel && linhas.some(x => !x.frequente) && linhas.some(x => x.frequente) ? linhas.findIndex(x => !x.frequente) : -1;
   return `<table><tr><th>Produto</th><th class="n">Pesado (kg)</th><th class="n">% da produção</th>${editavel ? '<th></th>' : ''}</tr>
     ${mostrar.map((x, i) => `${i === sep ? `<tr><td colspan="${editavel ? 4 : 3}" class="mut" style="font-size:12px">Outros produtos</td></tr>` : ''}<tr><td>${esc(x.nome)}</td><td class="n">${x.real == null ? '<span class="mut">—</span>' : num(x.real, 1)}</td><td class="n">${x.real == null || !total ? '' : num(100 * x.real / total, 1) + '%'}</td>
       ${editavel ? `<td class="n lanc" data-prod="${x.codigo}"><button class="b sec" style="padding:4px 10px" data-lancar="${x.codigo}">${x.real == null ? 'Lançar peso' : 'Somar peso'}</button> <button class="lnk" data-etq="${x.codigo}">etiquetas</button></td>` : ''}</tr>`).join('')}
     <tr class="tot"><td><b>Total da saída</b></td><td class="n"><b>${num(total, 1)}</b></td><td class="n"><b>${total ? '100%' : ''}</b></td>${editavel ? '<td></td>' : ''}</tr></table>
-    <p style="margin:8px 0 0">Rendimento geral do lote: <b>${r == null ? (l.peso_liquido_kg ? '—' : 'lote sem peso de entrada') : num(r, 1) + '% do peso vivo'}</b>${alertaRend(l, r) ? ` <span class="tag">fora da faixa de ${FAIXA_REND[0]}% a ${FAIXA_REND[1]}%: confira os pesos lançados</span>` : ''}</p>`;
+    <p style="margin:8px 0 0">${rg ? rg.rotulo : 'Rendimento geral do lote'}: <b>${r == null ? (l.peso_liquido_kg ? '—' : 'lote sem peso de entrada') : num(r, 1) + '% do peso vivo'}</b>${alertaRend(l, r) ? ` <span class="tag">fora da faixa de ${FAIXA_REND[0]}% a ${FAIXA_REND[1]}%: confira os pesos lançados</span>` : ''}</p>`;
 }
 function tabelaComparativo(l, planos, pesagens, editavel = false) {
   const c = comparativo(l, planos, pesagens); if (!c.length) return '';
@@ -364,10 +364,13 @@ function tabelaComparativo(l, planos, pesagens, editavel = false) {
 // ───────── DIA DE PRODUÇÃO ─────────
 // energia, água, limpeza e demais gastos são lançados em Despesas e entram no rateio do mês
 const F_DIA = [{ k:'observacao', label:'Observação do dia' }];
+let LOTES_DIA = [], LOTE_EDIT = null; // lotes do dia aberto, para o campo "Pesar junto com"
 const F_LOTE = [
   { k:'ordem', label:'Ordem no dia', type:'number', step:1, req:true },
   { k:'status', label:'Status', type:'select', req:true, def:'aberto', options:() => Object.entries(STATUS) },
   { k:'cooperado_id', label:'Cooperado', type:'select', int:true, req:true, options:() => ativos('cooperados').map(c => [c.id, c.nome]) },
+  { k:'pesar_com', label:'Pesar junto com (pesagem de saída conjunta)', type:'select', int:true,
+    options:() => LOTES_DIA.filter(x => !x.pesar_com && x.id !== LOTE_EDIT).map(x => [x.id, `${x.codigo} · ${nomeDe('cooperados', x.cooperado_id)}`]) },
   { k:'tipo_ave', label:'Tipo de ave', type:'select', req:true, options:() => st.ref.tipos_ave.map(t => [t.codigo, `${t.codigo} · ${t.nome}`]) },
   { k:'motorista_id', label:'Motorista', type:'select', int:true, options:() => ativos('motoristas').map(c => [c.id, c.nome]) },
   { k:'veiculo_id', label:'Veículo', type:'select', int:true, options:() => ativos('veiculos').map(c => [c.id, c.placa]) },
@@ -393,6 +396,8 @@ async function telaDia() {
     q(sb.from('v_custo_lote').select('*').eq('data', d))]);
   const planos = lotes.length ? await q(sb.from('lote_planos').select('*').in('lote_id', lotes.map(l => l.id)).order('id')) : [];
   const pesagens = lotes.length ? await q(sb.from('lote_pesagens').select('*').in('lote_id', lotes.map(l => l.id)).order('id')) : [];
+  const conjuntas = lotes.length ? await q(sb.from('pesagens_conjuntas').select('*').in('grupo_lote_id', lotes.map(l => l.id)).order('id')) : [];
+  LOTES_DIA = lotes; LOTE_EDIT = null;
   const embSaidas = lotes.length ? await q(sb.from('embalagem_movimentos').select('*').in('lote_id', lotes.map(l => l.id)).order('id')) : [];
   const conds = lotes.length ? await q(sb.from('lote_condenacoes').select('*').in('lote_id', lotes.map(l => l.id)).order('id')) : [];
   const embSaldos = lotes.length ? await q(sb.from('v_embalagem_saldo').select('*').order('nome')) : [];
@@ -416,7 +421,17 @@ async function telaDia() {
   const lp = lotes.find(l => l.id === st.planoLote);
   const pesagensDe = id => pesagens.filter(p => p.lote_id === id);
   const pesado = id => pesagensDe(id).reduce((a, p) => a + Number(p.peso_kg), 0);
-  const lw = lotes.find(l => l.id === st.pesoLote);
+  // pesagem conjunta: o grupo é o primeiro lote (raiz) + os lotes que apontam para ele
+  const raiz = l => l.pesar_com || l.id, membros = l => lotes.filter(x => raiz(x) === raiz(l)), emGrupo = l => membros(l).length > 1;
+  const grupoTxt = l => membros(l).map(x => x.codigo.slice(-2)).join(' + ');
+  const kgSaida = l => emGrupo(l) ? membros(l).reduce((a, x) => a + pesado(x.id), 0) : pesado(l.id);
+  const pseudo = l => { if (!emGrupo(l)) return l; const ms = membros(l);
+    return { ...l, peso_liquido_kg: ms.every(x => x.peso_liquido_kg) ? ms.reduce((a, x) => a + Number(x.peso_liquido_kg), 0) : null, cabecas_pagantes: ms.reduce((a, x) => a + x.cabecas_pagantes, 0),
+      status: ms.every(x => x.status === 'finalizado') ? 'finalizado' : 'em_producao' }; };
+  const lw = lotes.find(l => l.id === st.pesoLote), conj = !!(lw && emGrupo(lw)), GW = lw ? pseudo(lw) : null;
+  const pesG = lw ? (conj ? membros(lw).flatMap(x => pesagensDe(x.id)) : pesagensDe(lw.id)) : [];
+  const kgW = lw ? kgSaida(lw) : 0;
+  const insPeso = o => conj ? q(sb.from('pesagens_conjuntas').insert({ grupo_lote_id:raiz(lw), ...o })) : q(sb.from('lote_pesagens').insert({ lote_id:lw.id, ...o }));
   const embDe = id => embSaidas.filter(m => m.lote_id === id);
   const embNome = id => (embSaldos.find(e => e.embalagem_id === id) || {}).nome || '—';
   const embUsadas = id => { const t = {}; for (const m of embDe(id)) t[m.embalagem_id] = (t[m.embalagem_id] || 0) + m.quantidade;
@@ -460,7 +475,7 @@ async function telaDia() {
       <td class="n">${l.peso_liquido_kg == null ? '<span class="tag">sem pesagem</span>' : num(l.peso_liquido_kg, 0)}</td>
       <td class="n">${num(l.aves_recebidas)}</td><td class="n">${pesoMedio(l) ? num(pesoMedio(l), 2) : '—'}</td>
       <td class="n">${num(l.mortos_chegada)}</td><td class="n">${num(l.condenadas)}</td><td class="n">${num(l.cabecas_pagantes)}</td>
-      <td>${pesado(l.id) ? `${num(pesado(l.id), 1)} kg ${tagRend(l, rendGeral(l, pesado(l.id)))}` : '<span class="tag">não pesado</span>'} <button class="lnk" data-peso="${l.id}">pesar</button></td>
+      <td>${kgSaida(l) ? `${num(kgSaida(l), 1)} kg${emGrupo(l) ? ' do grupo' : ''} ${tagRend(pseudo(l), rendGeral(pseudo(l), kgSaida(l)))}` : '<span class="tag">não pesado</span>'}${emGrupo(l) ? ` <span class="tag az" title="pesagem de saída conjunta">grupo ${grupoTxt(l)}</span>` : ''} <button class="lnk" data-peso="${l.id}">pesar</button></td>
       <td>${embDe(l.id).length ? `<span class="tag ok">${num(embDe(l.id).reduce((a, m) => a + m.quantidade, 0))} un</span>` : '<span class="tag">sem baixa</span>'} <button class="lnk" data-emb="${l.id}">baixar</button></td>
       <td class="n"><b>${brl(custoLote(l.id))}</b></td>
       <td>${fx ? '' : (l.status === 'aberto' ? `<button class="lnk" data-st="${l.id}:em_producao">iniciar produção</button>` : l.status === 'em_producao' ? `<button class="lnk" data-st="${l.id}:finalizado">finalizar</button>` : `<button class="lnk" data-st="${l.id}:em_producao">reabrir lote</button>`)}
@@ -495,15 +510,17 @@ async function telaDia() {
     <h2 style="margin-top:16px">Produção prevista</h2>${tabelaPrevisao(lp, planosDe(lp.id)) || '<p class="mut">A previsão aparece conforme o plano é montado.</p>'}
     <p class="mut" style="margin-top:8px">Rendimentos de referência por tipo de ave, editáveis em Cadastros → Rendimentos. Peso seco, antes do chiller.</p></div>`}
 
-  ${!lw ? '' : `<div class="card" id="cPeso"><h2>Pesagem de saída · lote ${esc(lw.codigo)} · ${esc(nomeDe('cooperados', lw.cooperado_id))}</h2>
+  ${!lw ? '' : `<div class="card" id="cPeso"><h2>${conj ? `Pesagem de saída conjunta · lotes ${esc(membros(lw).map(x => x.codigo).join(' + '))}` : `Pesagem de saída · lote ${esc(lw.codigo)} · ${esc(nomeDe('cooperados', lw.cooperado_id))}`}</h2>
+    ${conj ? `<p class="card aviso" style="margin:0 0 12px">Os lotes abaixo são pesados juntos. Cada peso lançado aqui vale para o grupo e é dividido entre os lotes pela proporção de cabeças pagantes:
+      ${membros(lw).map(x => `<b>${esc(x.codigo)}</b> (${esc(nomeDe('cooperados', x.cooperado_id))}, ${num(x.cabecas_pagantes)} cabeças, ${GW.cabecas_pagantes ? num(100 * x.cabecas_pagantes / GW.cabecas_pagantes, 1) : '—'}%)`).join('; ')}. Se as cabeças mudarem, a divisão é refeita sozinha.</p>` : ''}
     <div class="kpis" style="margin-bottom:12px">
-      <div class="kpi"><small>Peso vivo do lote</small><b>${lw.peso_liquido_kg ? num(lw.peso_liquido_kg, 0) + ' kg' : 'sem pesagem'}</b></div>
-      <div class="kpi"><small>Total pesado na saída</small><b>${num(pesado(lw.id), 1)} kg</b></div>
-      <div class="kpi ${alertaRend(lw, rendGeral(lw, pesado(lw.id))) ? '' : 'big'}"${alertaRend(lw, rendGeral(lw, pesado(lw.id))) ? ' style="background:#fdecdc"' : ''}><small>Rendimento geral (saída ÷ peso vivo)</small><b>${rendGeral(lw, pesado(lw.id)) == null ? '—' : num(rendGeral(lw, pesado(lw.id)), 1) + '%'}</b></div>
-      <div class="kpi"><small>Kg por ave abatida</small><b>${pesado(lw.id) && lw.cabecas_pagantes ? num(pesado(lw.id) / lw.cabecas_pagantes, 3) : '—'}</b></div></div>
-    ${alertaRend(lw, rendGeral(lw, pesado(lw.id))) ? `<p class="card aviso" style="margin:0 0 12px">O rendimento geral está fora da faixa esperada (${FAIXA_REND[0]}% a ${FAIXA_REND[1]}%). Confira se algum peso foi digitado errado ou lançado no lote errado.</p>` : ''}
+      <div class="kpi"><small>Peso vivo ${conj ? 'do grupo' : 'do lote'}</small><b>${GW.peso_liquido_kg ? num(GW.peso_liquido_kg, 0) + ' kg' : 'sem pesagem'}</b></div>
+      <div class="kpi"><small>Total pesado na saída</small><b>${num(kgW, 1)} kg</b></div>
+      <div class="kpi ${alertaRend(GW, rendGeral(GW, kgW)) ? '' : 'big'}"${alertaRend(GW, rendGeral(GW, kgW)) ? ' style="background:#fdecdc"' : ''}><small>Rendimento geral (saída ÷ peso vivo)</small><b>${rendGeral(GW, kgW) == null ? '—' : num(rendGeral(GW, kgW), 1) + '%'}</b></div>
+      <div class="kpi"><small>Kg por ave abatida</small><b>${kgW && GW.cabecas_pagantes ? num(kgW / GW.cabecas_pagantes, 3) : '—'}</b></div></div>
+    ${alertaRend(GW, rendGeral(GW, kgW)) ? `<p class="card aviso" style="margin:0 0 12px">O rendimento geral está fora da faixa esperada (${FAIXA_REND[0]}% a ${FAIXA_REND[1]}%). Confira se algum peso foi digitado errado ou lançado no lote errado.</p>` : ''}
     <p class="mut">Clique em "Lançar peso" na linha do produto, digite os kg e tecle Enter; o sistema passa para o produto seguinte. Produto que não foi produzido: deixe vazio (ou 0) e tecle Enter, ou clique em "pular"; nada é gravado. Os produtos mais pesados pela COPAF aparecem primeiro.</p>
-    <div class="scroll">${planosDe(lw.id).length ? tabelaComparativo(lw, planosDe(lw.id), pesagensDe(lw.id), true) : tabelaSaida(lw, pesagensDe(lw.id), true)}</div>
+    <div class="scroll">${planosDe(lw.id).length && !conj ? tabelaComparativo(lw, planosDe(lw.id), pesagensDe(lw.id), true) : tabelaSaida(GW, pesG, true, conj ? { rotulo:'Rendimento geral do grupo' } : null)}</div>
     <p style="margin:12px 0 0"><button type="button" class="b sec" id="bFecharPeso">Fechar painel</button> <button type="button" class="lnk" data-plano="${lw.id}">${planosDe(lw.id).length ? 'ver plano de cortes' : 'Plano de cortes (opcional)'}</button></p>
     <details style="margin-top:12px"><summary class="mut" style="cursor:pointer">Lançar produto que não está no plano</summary>
     <form id="fPeso" class="row" style="margin-top:10px">
@@ -517,8 +534,11 @@ async function telaDia() {
     <p class="mut" style="margin:8px 0 0">Cada peso salvo vira um lançamento; pesos do mesmo produto são somados. Para corrigir, remova o lançamento na lista abaixo e lance de novo. A pesagem pode ser lançada mesmo depois de o dia estar fechado, pois não altera o custo.</p>
     <h2 style="margin-top:16px">Lançamentos</h2>
     <div class="scroll"><table><tr><th>Lançado em</th><th>Produto</th><th>Conservação</th><th class="n">Peso (kg)</th><th class="n">Volumes</th><th>Observação</th><th></th></tr>
-    ${pesagensDe(lw.id).map(w => `<tr><td>${new Date(w.criado_em).toLocaleString('pt-BR', { dateStyle:'short', timeStyle:'short' })}</td><td>${esc(nomeProduto(w.produto))}</td><td>${w.conservacao === 'congelado' ? 'Congelado' : 'Resfriado'}</td>
-      <td class="n">${num(w.peso_kg, 2)}</td><td class="n">${w.volumes == null ? '' : num(w.volumes)}</td><td>${esc(w.observacao)}</td><td><button class="lnk" data-del="lote_pesagens:${w.id}">remover</button></td></tr>`).join('') || '<tr><td colspan="7" class="mut">Nenhuma pesagem lançada.</td></tr>'}
+    ${(conj ? conjuntas.filter(c => c.grupo_lote_id === raiz(lw)).map(w => ({ ...w, tab:'pesagens_conjuntas', obs:[w.observacao, 'pesagem do grupo'].filter(Boolean).join(' · ') }))
+        .concat(pesG.filter(w => !w.conjunta_id).map(w => ({ ...w, tab:'lote_pesagens', obs:[w.observacao, 'só do lote ' + (lotes.find(x => x.id === w.lote_id) || {}).codigo].filter(Boolean).join(' · ') })))
+        : pesagensDe(lw.id).map(w => ({ ...w, tab: w.conjunta_id ? '' : 'lote_pesagens', obs: w.conjunta_id ? [w.observacao, 'parte da pesagem de um grupo'].filter(Boolean).join(' · ') : w.observacao })))
+      .map(w => `<tr><td>${new Date(w.criado_em).toLocaleString('pt-BR', { dateStyle:'short', timeStyle:'short' })}</td><td>${esc(nomeProduto(w.produto))}</td><td>${w.conservacao === 'congelado' ? 'Congelado' : 'Resfriado'}</td>
+      <td class="n">${num(w.peso_kg, 2)}</td><td class="n">${w.volumes == null ? '' : num(w.volumes)}</td><td>${esc(w.obs)}</td><td>${w.tab ? `<button class="lnk" data-del="${w.tab}:${w.id}">remover</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="mut">Nenhuma pesagem lançada.</td></tr>'}
     </table></div></div>`}
 
   ${!le ? '' : `<div class="card" id="cEmb"><h2>Embalagens · lote ${esc(le.codigo)} · ${esc(nomeDe('cooperados', le.cooperado_id))}</h2>
@@ -588,9 +608,12 @@ async function telaDia() {
     render(); } catch (er) { falha(er); } };
   main.onclick = async e => {
     const t = e.target;
-    if (t.dataset.del) { const [tab, id] = t.dataset.del.split(':'); if (!confirm('Confirma a exclusão deste lançamento?')) return;
+    if (t.dataset.del) { const [tab, id] = t.dataset.del.split(':');
+      if (tab === 'lotes' && lotes.some(x => x.pesar_com === Number(id))) return alert('Este lote é o primeiro de um grupo de pesagem conjunta. Antes de excluí-lo, edite os outros lotes do grupo e deixe o campo "Pesar junto com" em branco.');
+      if (tab === 'pesagens_conjuntas' && !confirm('Esta pesagem vale para todos os lotes do grupo. Remover?')) return;
+      if (tab !== 'pesagens_conjuntas' && !confirm('Confirma a exclusão deste lançamento?')) return;
       try { await q(sb.from(tab).delete().eq('id', id)); render(); } catch (er) { falha(er); } }
-    if (t.dataset.edit) { const l = lotes.find(x => x.id === Number(t.dataset.edit)); editando = l.id;
+    if (t.dataset.edit) { const l = lotes.find(x => x.id === Number(t.dataset.edit)); editando = l.id; LOTE_EDIT = l.id;
       $('#tLote').textContent = 'Editando lote ' + l.codigo; fL.querySelector('.grid').innerHTML = campos(F_LOTE, l); $('#bLimpar').hidden = false; $('#cLote').scrollIntoView({ behavior:'smooth' }); travaCarcacas(); }
     if (t.id === 'bLimpar') render();
     if (t.dataset.plano) { st.planoLote = Number(t.dataset.plano); await render(); const c = $('#cPlano'); if (c) c.scrollIntoView({ behavior:'smooth' }); }
@@ -608,14 +631,16 @@ async function telaDia() {
     if (t.dataset.cancelar) render();
     if (t.dataset.st) { const [id, novo] = t.dataset.st.split(':'), l = lotes.find(x => x.id === Number(id)), agora = new Date().toTimeString().slice(0, 5), up = { status:novo, finalizado_em:null };
       if (novo === 'em_producao' && !l.hora_inicio) up.hora_inicio = agora;
+      const alvo = novo === 'finalizado' && emGrupo(l) ? membros(l).filter(x => x.status !== 'finalizado') : [l];
       if (novo === 'finalizado') {
-        const kg = pesado(l.id), r = rendGeral(l, kg);
-        const aviso = !kg ? '\n\nATENÇÃO: este lote não tem nenhuma pesagem de saída.' : foraFaixa(r) ? `\n\nATENÇÃO: rendimento geral de ${num(r, 1)}%, fora da faixa de ${FAIXA_REND[0]}% a ${FAIXA_REND[1]}%. Confira os pesos lançados.` : '';
-        if (!confirm(`Finalizar o lote ${l.codigo}?\n\nConfira antes: mortos na chegada (${l.mortos_chegada}), condenadas (${l.condenadas}) e cabeças pagantes (${l.cabecas_pagantes}).${aviso}`)) return;
-        if (!l.hora_termino) up.hora_termino = agora; up.finalizado_em = new Date().toISOString(); }
-      try { await q(sb.from('lotes').update(up).eq('id', id)); render(); } catch (er) { falha(er); } }
+        const g = pseudo(l), kg = kgSaida(l), r = rendGeral(g, kg), soma = c => alvo.reduce((a, x) => a + Number(x[c] || 0), 0);
+        const aviso = !kg ? `\n\nATENÇÃO: ${emGrupo(l) ? 'o grupo' : 'este lote'} não tem nenhuma pesagem de saída.` : foraFaixa(r) ? `\n\nATENÇÃO: rendimento geral de ${num(r, 1)}%, fora da faixa de ${FAIXA_REND[0]}% a ${FAIXA_REND[1]}%. Confira os pesos lançados.` : '';
+        if (!confirm(`${alvo.length > 1 ? `Finalizar os lotes do grupo de pesagem (${alvo.map(x => x.codigo).join(', ')})?` : `Finalizar o lote ${l.codigo}?`}\n\nConfira antes: mortos na chegada (${soma('mortos_chegada')}), condenadas (${soma('condenadas')}) e cabeças pagantes (${soma('cabecas_pagantes')}).${aviso}`)) return;
+        up.finalizado_em = new Date().toISOString(); }
+      try { for (const x of alvo) await q(sb.from('lotes').update({ ...up, ...(novo === 'finalizado' && !x.hora_termino ? { hora_termino:agora } : {}) }).eq('id', x.id)); render(); } catch (er) { falha(er); } }
     if (t.id === 'bIrDesp') { st.despMes = d.slice(0, 7); st.tab = 'desp'; render(); }
-    if (t.dataset.rel) { const l = lotes.find(x => x.id === Number(t.dataset.rel)); relatorio(l, cd, lotes, custoLote, planosDe(l.id), mesFechado, pesagensDe(l.id), embUsadas(l.id)); }
+    if (t.dataset.rel) { const l = lotes.find(x => x.id === Number(t.dataset.rel));
+      relatorio(l, cd, lotes, custoLote, planosDe(l.id), mesFechado, pesagensDe(l.id), embUsadas(l.id), emGrupo(l) ? { txt:membros(l).filter(x => x.id !== l.id).map(x => x.codigo).join(', '), r:rendGeral(pseudo(l), kgSaida(l)) } : null); }
   };
   const fCo = $('#fCond');
   if (fCo) fCo.onsubmit = async e => { e.preventDefault(); try {
@@ -671,22 +696,22 @@ async function telaDia() {
     const fm = td.querySelector('form');
     // vai para o próximo produto; produto sem produção é só pulado, sem gravar nada
     const irProximo = () => {
-      const comPlano = planosDe(lw.id).length > 0, linhas = comPlano ? comparativo(lw, planosDe(lw.id), pesagensDe(lw.id)) : listaSaida(pesagensDe(lw.id)).linhas, i = linhas.findIndex(x => x.codigo === cod);
+      const comPlano = planosDe(lw.id).length > 0 && !conj, linhas = comPlano ? comparativo(lw, planosDe(lw.id), pesagensDe(lw.id)) : listaSaida(pesG).linhas, i = linhas.findIndex(x => x.codigo === cod);
       const prox = comPlano ? linhas.slice(i + 1).concat(linhas.slice(0, i)).find(x => x.real == null && !x.foraDoPlano) : linhas[i + 1];
       st.proxLancar = prox ? prox.codigo : null; render(); };
     fm.querySelector('[data-pular]').onclick = e => { e.stopPropagation(); irProximo(); };
     fm.onsubmit = async e => { e.preventDefault(); try {
       const kg = Number(fm.elements.peso_kg.value || 0);
       if (!(kg > 0)) return irProximo();
-      await q(sb.from('lote_pesagens').insert({ lote_id:lw.id, produto:cod, conservacao:fm.elements.conservacao.value, peso_kg:kg, volumes: fm.elements.volumes.value ? Number(fm.elements.volumes.value) : null }));
+      await insPeso({ produto:cod, conservacao:fm.elements.conservacao.value, peso_kg:kg, volumes: fm.elements.volumes.value ? Number(fm.elements.volumes.value) : null });
       irProximo(); } catch (er) { falha(er); } };
     fm.elements.peso_kg.focus();
   }
   if (lw && st.proxLancar) { const c = st.proxLancar; st.proxLancar = null; abrirLanc(c); }
   const fW = $('#fPeso');
   if (fW) fW.onsubmit = async e => { e.preventDefault(); try {
-    await q(sb.from('lote_pesagens').insert({ lote_id:lw.id, produto:fW.elements.produto.value, conservacao:fW.elements.conservacao.value, peso_kg:Number(fW.elements.peso_kg.value),
-      volumes: fW.elements.volumes.value ? Number(fW.elements.volumes.value) : null, observacao:fW.elements.observacao.value.trim() || null }));
+    await insPeso({ produto:fW.elements.produto.value, conservacao:fW.elements.conservacao.value, peso_kg:Number(fW.elements.peso_kg.value),
+      volumes: fW.elements.volumes.value ? Number(fW.elements.volumes.value) : null, observacao:fW.elements.observacao.value.trim() || null });
     st.ultimoProduto = fW.elements.produto.value; await render(); const n = $('#fPeso'); if (n) { n.elements.produto.value = st.ultimoProduto; n.elements.peso_kg.focus(); } } catch (er) { falha(er); } };
   const fP = $('#fPlano');
   if (fP) {
@@ -732,7 +757,7 @@ function controlePagamento(d, diaristas) {
 }
 
 // ───────── RELATÓRIO DO LOTE (impressão / PDF) ─────────
-function relatorio(l, cd, lotes, custoLote, planos, fechado, pesagens, embalagens) {
+function relatorio(l, cd, lotes, custoLote, planos, fechado, pesagens, embalagens, grupo = null) {
   const part = l.cabecas_pagantes / cd.cabecas_dia, custo = Number(custoLote(l.id) || 0), porCab = l.cabecas_pagantes ? custo / l.cabecas_pagantes : null;
   const diarLote = cd.custo_diaristas * part, ratLote = Number(cd.taxa_estrutura || 0) * l.cabecas_pagantes;
   $('#rel').innerHTML = `
@@ -750,7 +775,8 @@ function relatorio(l, cd, lotes, custoLote, planos, fechado, pesagens, embalagen
       ${planos.map(p => `<tr><td class="n">${num(p.aves)}</td><td style="white-space:normal">${esc(descPlano(p, l.tipo_ave))}</td><td>${p.conservacao === 'congelado' ? 'Congelado' : 'Resfriado'}</td></tr>`).join('')}</table>
     ${pesagens.length ? '' : `<h2>Produção prevista</h2>${tabelaPrevisao(l, planos)}`}
     <p style="font-size:11px">Previsão calculada pelo peso médio vivo do lote e pelos rendimentos de referência do abatedouro; o peso real de cada produto pode variar.</p>`}
-    ${!pesagens.length ? '' : `<h2>Produção realizada (pesagem de saída)</h2>${planos.length ? tabelaComparativo(l, planos, pesagens) + '<p style="font-size:11px">Rendimento real = kg pesados ÷ kg vivos destinados ao produto no plano de cortes.</p>' : tabelaSaida(l, pesagens)}`}
+    ${!pesagens.length ? '' : `<h2>Produção realizada (pesagem de saída)</h2>${grupo ? tabelaSaida(l, pesagens, false, { r:grupo.r, rotulo:'Rendimento geral do grupo de pesagem' }) + `<p style="font-size:11px">Pesagem de saída conjunta com o(s) lote(s) ${esc(grupo.txt)}: o peso de cada produto foi dividido entre os lotes pela proporção de cabeças pagantes.</p>`
+      : planos.length ? tabelaComparativo(l, planos, pesagens) + '<p style="font-size:11px">Rendimento real = kg pesados ÷ kg vivos destinados ao produto no plano de cortes.</p>' : tabelaSaida(l, pesagens)}`}
     ${!embalagens.length ? '' : `<h2>Embalagens utilizadas no lote</h2>
     <table><tr><th>Embalagem</th><th class="n">Quantidade</th></tr>
       ${embalagens.map(e => `<tr><td>${esc(e.nome)}</td><td class="n">${num(e.quantidade)}</td></tr>`).join('')}</table>`}
@@ -850,7 +876,10 @@ function htmlPainel(D, imprimir = false) {
   const nAves = soma(lotes, recebidas), nAbat = soma(lotes, abatidas), nMortos = soma(lotes, l => l.mortos_chegada), nCond = soma(lotes, l => l.condenadas), nPag = soma(lotes, l => l.cabecas_pagantes);
   const comPeso = lotes.filter(l => l.peso_liquido_kg > 0), pesoVivo = soma(comPeso, l => l.peso_liquido_kg), avesComPeso = soma(comPeso, recebidas);
   const producao = soma(pes, p => p.peso_kg);
-  const rendL = l => l.peso_liquido_kg > 0 && kgLote(l.id) > 0 ? 100 * kgLote(l.id) / l.peso_liquido_kg : null;
+  // lotes pesados juntos têm o rendimento do grupo (kg do grupo ÷ peso vivo do grupo)
+  const raizP = l => l.pesar_com || l.id, membP = l => lotes.filter(x => raizP(x) === raizP(l));
+  const kgG = l => soma(membP(l), x => kgLote(x.id)), vivoG = l => membP(l).every(x => x.peso_liquido_kg > 0) ? soma(membP(l), x => x.peso_liquido_kg) : null;
+  const rendL = l => vivoG(l) && kgG(l) > 0 ? 100 * kgG(l) / vivoG(l) : null;
   const validos = comPeso.filter(l => rendL(l) != null && !foraFaixa(rendL(l))), foraLotes = comPeso.filter(l => rendL(l) != null && foraFaixa(rendL(l)));
   const rendMes = soma(validos, l => kgLote(l.id)) / Math.max(soma(validos, l => l.peso_liquido_kg), 1) * 100;
   // custos
@@ -881,8 +910,9 @@ function htmlPainel(D, imprimir = false) {
   const porDia = vdia.map(v => ({ rot: dataBR(v.data).slice(0, 5), v: Number(v.cabecas_dia), tip: `${dataBR(v.data)}: ${num(v.cabecas_dia)} cabeças · diaristas ${brl(v.custo_direto)} (${v.cabecas_dia ? 'R$ ' + num(v.custo_direto / v.cabecas_dia, 2) : '—'}/cabeça)` }));
   const cpcDia = vdia.filter(v => Number(v.cabecas_dia) > 0).map(v => ({ rot: dataBR(v.data).slice(0, 5), v: v.custo_direto / v.cabecas_dia, tip: `${dataBR(v.data)}: R$ ${num(v.custo_direto / v.cabecas_dia, 2)} por cabeça de mão de obra diarista` }));
   // rendimento por lote
-  const rendLotes = comPeso.filter(l => rendL(l) != null).map(l => ({ rot: `${l.codigo.slice(4, 8).replace(/(..)(..)/, '$2/$1')}-${l.codigo.slice(-2)} · ${nomeDe('cooperados', l.cooperado_id).trim().slice(0, 24)}`, v: rendL(l), alerta: foraFaixa(rendL(l)), cor: foraFaixa(rendL(l)) ? '#b4541a' : PN_VERDE,
-    tip: `${l.codigo}: ${num(kgLote(l.id), 0)} kg pesados ÷ ${num(l.peso_liquido_kg, 0)} kg vivos = ${num(rendL(l), 1)}%` }));
+  const rendLotes = comPeso.filter(l => rendL(l) != null && raizP(l) === l.id).map(l => { const g = membP(l).length > 1;
+    return { rot: `${l.codigo.slice(4, 8).replace(/(..)(..)/, '$2/$1')}-${membP(l).map(x => x.codigo.slice(-2)).join('+')} · ${g ? 'pesagem conjunta' : nomeDe('cooperados', l.cooperado_id).trim().slice(0, 24)}`, v: rendL(l), alerta: foraFaixa(rendL(l)), cor: foraFaixa(rendL(l)) ? '#b4541a' : PN_VERDE,
+      tip: `${membP(l).map(x => x.codigo).join(' + ')}: ${num(kgG(l), 0)} kg pesados ÷ ${num(vivoG(l), 0)} kg vivos = ${num(rendL(l), 1)}%` }; });
   // produção por grupo e top produtos
   const porProd = {}; pes.forEach(p => { porProd[p.produto] = (porProd[p.produto] || 0) + Number(p.peso_kg); });
   const grupos = {}; Object.entries(porProd).forEach(([c, kg]) => { const g = pnGrupoProduto(c, nomeProduto(c)); grupos[g] = (grupos[g] || 0) + kg; });
