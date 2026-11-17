@@ -137,7 +137,7 @@ grant execute on function fechar_caixa(date, numeric, text) to authenticated;
 update usuarios set caixa_liberado = true where email = 'juanpinheiro1@gmail.com';
 select set_config('request.jwt.claims', '{"email":"juanpinheiro1@gmail.com"}', true);
 do $$
-declare h date := (now() at time zone 'America/Fortaleza')::date; r caixa_fechamentos; p record; ok boolean; s0 numeric; msg text := '';
+declare h date := (now() at time zone 'America/Fortaleza')::date; r caixa_fechamentos; p record; ok boolean; s0 numeric; s1 numeric; msg text := '';
 begin
   -- 1) abertura: fecha ontem conferindo o saldo do sistema
   select * into p from caixa_previa(h - 1); s0 := p.saldo_sistema;
@@ -155,16 +155,17 @@ begin
   ok := false; begin update caixa_movimentos set valor = valor where data <= h - 1; if not found then ok := true; end if; exception when others then ok := true; end;
   if not ok then raise exception 'falha 2c'; end if;
   -- 3) movimento hoje e fechamento com falta de 10
+  select saldo_sistema into s1 from caixa_previa(h);
   insert into caixa_movimentos (data, tipo, valor) values (h, 'aporte', 100);
   insert into despesas (data, categoria_id, descricao, valor, fonte) values (h, (select min(id) from despesa_categorias), 't', 30, 'caixa');
   select * into p from caixa_previa(h);
-  if p.saldo_inicial <> s0 or p.saldo_sistema <> s0 + 70 or p.desde <> h then raise exception 'falha 3a %', p; end if;
-  r := fechar_caixa(h, s0 + 60);
-  if r.diferenca <> -10 or r.saldo_final <> s0 + 60 then raise exception 'falha 3b'; end if;
+  if p.saldo_inicial <> s0 or p.saldo_sistema <> s1 + 70 or p.desde <> h then raise exception 'falha 3a %', p; end if;
+  r := fechar_caixa(h, s1 + 60);
+  if r.diferenca <> -10 or r.saldo_final <> s1 + 60 then raise exception 'falha 3b'; end if;
   if not exists (select 1 from caixa_movimentos where data = h and tipo = 'falta' and valor = 10) then raise exception 'falha 3c'; end if;
   -- saldo calculado do zero bate com o saldo final
   if (select coalesce(sum(case when tipo in ('aporte','sobra') then valor else -valor end),0) from caixa_movimentos)
-     - (select coalesce(sum(valor),0) from despesas where fonte = 'caixa') <> s0 + 60 then raise exception 'falha 3d'; end if;
+     - (select coalesce(sum(valor),0) from despesas where fonte = 'caixa') <> s1 + 60 then raise exception 'falha 3d'; end if;
   -- 4) dia futuro não fecha; fechar de novo não fecha
   ok := false; begin r := fechar_caixa(h + 1, 0); exception when others then ok := true; end; if not ok then raise exception 'falha 4a'; end if;
   ok := false; begin r := fechar_caixa(h, 0); exception when others then ok := true; end; if not ok then raise exception 'falha 4b'; end if;
@@ -177,6 +178,6 @@ begin
   ok := false; begin r := fechar_caixa(h, 0); exception when others then ok := true; end; if not ok then raise exception 'falha 5c'; end if;
   perform set_config('request.jwt.claims', '{"email":"juanpinheiro1@gmail.com"}', true);
   delete from caixa_movimentos where data = h + 1;
-  msg := msg || format('GC rendimentos %s; produto ordem %s', (select count(*) from rendimentos where tipo_ave = 'GC'), (select ordem from produtos where codigo = 'galinha_caipira'));
+  msg := msg || format('hoje antes %s; ', s1) || format('GC rendimentos %s; produto ordem %s', (select count(*) from rendimentos where tipo_ave = 'GC'), (select ordem from produtos where codigo = 'galinha_caipira'));
   raise exception 'TESTE OK (desfeito): %', msg;
 end $$;
