@@ -258,8 +258,9 @@ const nomeProduto = c => (st.ref.produtos.find(p => p.codigo === c) || {}).nome 
 const produtosAtivos = () => st.ref.produtos.filter(p => p.ativo !== false);
 const pctDe = (tipo, prod) => Number((st.ref.rendimentos.find(r => r.tipo_ave === tipo && r.produto === prod) || {}).pct || 0);
 const pesoMedio = l => l.peso_liquido_kg && l.aves_recebidas ? l.peso_liquido_kg / l.aves_recebidas : null;
+const nomeInteiro = t => t === 'GL' ? 'Galeto inteiro com miúdos' : t === 'GC' ? 'Galinha inteira com miúdos' : 'Frango inteiro com miúdos';
 function descPlano(p, tipoAve) {
-  if (p.destino === 'inteiro') return tipoAve === 'GL' ? 'Galeto inteiro com miúdos' : 'Frango inteiro com miúdos';
+  if (p.destino === 'inteiro') return nomeInteiro(tipoAve);
   return produtosDoPlano(p).map(nomeProduto).join(', ') || 'nenhum corte escolhido';
 }
 // kg previstos por produto: aves do plano × peso médio vivo × rendimento do tipo de ave
@@ -496,7 +497,7 @@ async function telaDia() {
     <form id="fPlano">
       <div class="row">
         <label>Quantidade de aves <input name="aves" type="number" step="1" min="1" required value="${Math.max(lp.cabecas_pagantes - noPlano(lp.id), 0) || ''}"></label>
-        <label>Entrega <select name="destino"><option value="cortes">Em cortes</option><option value="inteiro">${lp.tipo_ave === 'GL' ? 'Galeto inteiro com miúdos' : 'Frango inteiro com miúdos'}</option></select></label>
+        <label>Entrega <select name="destino"><option value="cortes">Em cortes</option><option value="inteiro">${nomeInteiro(lp.tipo_ave)}</option></select></label>
         <label>Conservação <select name="conservacao"><option value="resfriado">Resfriado</option><option value="congelado">Congelado</option></select></label>
         <label>Observação <input name="observacao"></label></div>
       <div id="pCortes" style="margin-top:10px">
@@ -1170,20 +1171,37 @@ async function prepararComprovante(file) {
 }
 async function telaDesp() {
   const mes = st.despMes = st.despMes || hoje().slice(0, 7), ini = mes + '-01', [a, m] = mes.split('-').map(Number), fim = `${m === 12 ? a + 1 : a}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01`;
-  const [cats, desp, comp, cxMov, cxDesp, parc] = await Promise.all([
+  const [cats, desp, comp, cxMov, cxDesp, parc, fechs] = await Promise.all([
     q(sb.from('despesa_categorias').select('*').order('nome')),
     q(sb.from('despesas').select('*').gte('data', ini).lt('data', fim).order('data', { ascending:false }).order('id', { ascending:false })),
     q(sb.from('competencias').select('fechada').eq('competencia', ini).maybeSingle()),
     q(sb.from('caixa_movimentos').select('*').order('data', { ascending:false }).order('id', { ascending:false })),
     q(sb.from('despesas').select('data,valor').eq('fonte', 'caixa')),
-    q(sb.from('v_despesa_mes').select('valor,rateia').eq('competencia', ini))]);
+    q(sb.from('v_despesa_mes').select('valor,rateia').eq('competencia', ini)),
+    q(sb.from('caixa_fechamentos').select('*').order('data', { ascending:false }))]);
+  const fAte = fechs.length ? fechs[0].data : null, podeCx = !!(st.perfil && st.perfil.caixa_liberado), cxFechado = d => fAte != null && d <= fAte;
+  const fechMes = fechs.filter(x => x.data >= ini && x.data < fim);
+  const proxCx = (() => { const ds = [...cxMov, ...cxDesp].map(x => x.data).filter(d => !cxFechado(d) && d <= hoje()).sort();
+    return ds.length ? ds[0] : fAte ? hoje() : somaDias(hoje(), -1); })();
+  const eD = st.despEdit ? desp.find(x => x.id === st.despEdit) : null, eC = st.cxEdit ? cxMov.find(x => x.id === st.cxEdit) : null;
+  if (st.despEdit && !eD) st.despEdit = null; if (st.cxEdit && !eC) st.cxEdit = null;
+  const vD = k => eD ? (eD[k] ?? '') : '', selD = (k, v) => eD && String(eD[k]) === String(v) ? 'selected' : '';
   const fechado = !!(comp && comp.fechada), cat = id => cats.find(c => c.id === id) || {}, soma = (l, fn = x => x.valor) => l.reduce((s, x) => s + Number(fn(x)), 0);
-  const sinal = x => x.tipo === 'aporte' ? Number(x.valor) : -Number(x.valor);
+  const sinal = x => x.tipo === 'aporte' || x.tipo === 'sobra' ? Number(x.valor) : -Number(x.valor);
+  const TIPO_CX = { aporte:'Aporte', devolucao:'Devolução', sobra:'Ajuste: sobra', falta:'Ajuste: falta' };
   const saldo = soma(cxMov, sinal) - soma(cxDesp), saldoIni = soma(cxMov.filter(x => x.data < ini), sinal) - soma(cxDesp.filter(x => x.data < ini));
   const movMes = cxMov.filter(x => x.data >= ini && x.data < fim), entradasMes = soma(movMes.filter(x => x.tipo === 'aporte')), devolMes = soma(movMes.filter(x => x.tipo === 'devolucao'));
+  const ajusteMes = soma(movMes.filter(x => x.tipo === 'sobra')) - soma(movMes.filter(x => x.tipo === 'falta'));
   const total = soma(desp), doCaixa = soma(desp.filter(x => x.fonte === 'caixa')), rateavel = soma(desp.filter(x => cat(x.categoria_id).rateia));
   const custoMes = soma(parc.filter(x => x.rateia)), mesRef = x => x.competencia ? x.competencia.slice(5, 7) + '/' + x.competencia.slice(0, 4) : '';
   const refTxt = x => `${mesRef(x)}${x.meses_rateio > 1 ? ` · ÷ ${x.meses_rateio} meses` : ''}`;
+  const acoesDesp = x => {
+    if (fechado) return '';
+    if (x.fonte === 'caixa') return cxFechado(x.data) ? ' <span class="tag">caixa fechado</span>' : podeCx ? ` <button class="lnk" data-editdesp="${x.id}">alterar</button> <button class="lnk" data-deldesp="${x.id}">excluir</button>` : '';
+    return `${podeCx ? ` <button class="lnk" data-editdesp="${x.id}">alterar</button>` : ''} <button class="lnk" data-deldesp="${x.id}">excluir</button>`; };
+  const tabFech = `<div class="scroll"><table><tr><th>Dia</th><th class="n">Saldo inicial</th><th class="n">(+) Aportes</th><th class="n">(−) Despesas</th><th class="n">(−) Devoluções</th><th class="n">(±) Ajustes</th><th class="n">Saldo do sistema</th><th class="n">Contado</th><th class="n">Diferença</th><th>Fechado por</th></tr>
+    ${fechMes.map(x => `<tr><td>${dataBR(x.data)}${x.desde ? (x.desde !== x.data ? `<br><small class="mut">desde ${dataBR(x.desde)}</small>` : '') : '<br><small class="mut">abertura (histórico)</small>'}</td><td class="n">${brl(x.saldo_inicial)}</td><td class="n">${brl(x.aportes)}</td><td class="n">${brl(x.despesas)}</td><td class="n">${brl(x.devolucoes)}</td><td class="n">${brl(x.ajustes)}</td>
+      <td class="n">${brl(x.saldo_sistema)}</td><td class="n"><b>${brl(x.contado)}</b></td><td class="n">${Number(x.diferenca) ? `<span class="tag">${Number(x.diferenca) > 0 ? 'sobra' : 'falta'} ${brl(Math.abs(x.diferenca))}</span>` : 'confere'}</td><td>${esc((x.fechado_por || '').split('@')[0])}${x.observacao ? `<br><small class="mut">${esc(x.observacao)}</small>` : ''}</td></tr>`).join('') || '<tr><td colspan="10" class="mut">Nenhum fechamento de caixa neste mês.</td></tr>'}</table></div>`;
   const porCat = cats.map(c => ({ c, v:soma(desp.filter(x => x.categoria_id === c.id)), n:desp.filter(x => x.categoria_id === c.id).length })).filter(x => x.n).sort((x, y) => y.v - x.v);
   const tabCat = `<table><tr><th>Categoria</th><th class="n">Lançamentos</th><th class="n">Total</th><th class="n">% do mês</th><th>Rateio</th></tr>
     ${porCat.map(x => `<tr><td>${esc(x.c.nome)}</td><td class="n">${x.n}</td><td class="n">${brl(x.v)}</td><td class="n">${total ? num(100 * x.v / total, 1) : 0}%</td><td>${x.c.rateia ? 'entra no custo' : 'fora do custo'}</td></tr>`).join('') || '<tr><td colspan="5" class="mut">Nenhuma despesa no mês.</td></tr>'}
@@ -1196,40 +1214,53 @@ async function telaDesp() {
       <div class="kpi"><small>Pagas por outra fonte</small><b>${brl(total - doCaixa)}</b></div>
       <div class="kpi"><small>Custo do mês (despesas com referência em ${MESES[m - 1].toLowerCase()}, com as parcelas de rateio)</small><b>${brl(custoMes)}</b></div>
       <div class="kpi big"><small>Saldo atual do caixa interno</small><b>${brl(saldo)}</b></div></div></div>
-    <div class="card"><h2>Nova despesa</h2>
+    <div class="card" id="cDesp"><h2>${eD ? `Alterar despesa: ${esc(eD.descricao)}` : 'Nova despesa'}</h2>
       ${fechado ? '<p class="mut">Este mês está fechado e não aceita novos lançamentos.</p>' : `<form id="fDesp"><div class="grid">
-        <label>Data <input name="data" type="date" required value="${hoje() >= ini && hoje() < fim ? hoje() : ini}" min="${ini}" max="${somaDias(fim, -1)}"></label>
-        <label>Categoria <select name="categoria_id" required><option value=""></option>${cats.filter(c => c.ativo).map(c => `<option value="${c.id}">${esc(c.nome)}</option>`).join('')}</select></label>
-        <label>Descrição <input name="descricao" required placeholder="o que foi comprado ou pago"></label>
-        <label>Fornecedor <input name="fornecedor"></label>
-        <label>Valor (R$) <input name="valor" type="number" step="0.01" min="0.01" required></label>
-        <label>Mês de referência <input name="competencia" type="month" required value="${mes}"></label>
-        <label>Custo <select name="meses_rateio"><option value="1">Custo deste mês</option>${[2, 3, 4, 5, 6, 8, 10, 12].map(n => `<option value="${n}">Ratear em ${n} meses</option>`).join('')}</select></label>
-        <label>Pago com <select name="fonte" required><option value="caixa">Caixa interno</option><option value="outra">Outra fonte</option></select></label>
-        <label>Forma de pagamento <select name="forma_pagamento"><option value=""></option>${FORMAS.map(x => `<option>${x}</option>`).join('')}</select></label>
-        <label>Nº da nota ou recibo <input name="documento"></label>
-        <label>Foto da nota ou recibo <input name="arquivo" type="file" accept="image/*,application/pdf"></label></div>
-        <p><button class="b">Lançar despesa</button> <span class="mut" id="dMsg"></span></p></form>
+        <label>Data <input name="data" type="date" required value="${eD ? eD.data : hoje() >= ini && hoje() < fim ? hoje() : ini}" min="${ini}" max="${somaDias(fim, -1)}"></label>
+        <label>Categoria <select name="categoria_id" required><option value=""></option>${cats.filter(c => c.ativo || (eD && eD.categoria_id === c.id)).map(c => `<option value="${c.id}" ${selD('categoria_id', c.id)}>${esc(c.nome)}</option>`).join('')}</select></label>
+        <label>Descrição <input name="descricao" required placeholder="o que foi comprado ou pago" value="${esc(vD('descricao'))}"></label>
+        <label>Fornecedor <input name="fornecedor" value="${esc(vD('fornecedor'))}"></label>
+        <label>Valor (R$) <input name="valor" type="number" step="0.01" min="0.01" required value="${vD('valor')}"></label>
+        <label>Mês de referência <input name="competencia" type="month" required value="${eD ? eD.competencia.slice(0, 7) : mes}"></label>
+        <label>Custo <select name="meses_rateio"><option value="1">Custo deste mês</option>${[2, 3, 4, 5, 6, 8, 10, 12].map(n => `<option value="${n}" ${selD('meses_rateio', n)}>Ratear em ${n} meses</option>`).join('')}</select></label>
+        <label>Pago com <select name="fonte" required><option value="caixa">Caixa interno</option><option value="outra" ${selD('fonte', 'outra')}>Outra fonte</option></select></label>
+        <label>Forma de pagamento <select name="forma_pagamento"><option value=""></option>${FORMAS.map(x => `<option ${selD('forma_pagamento', x)}>${x}</option>`).join('')}</select></label>
+        <label>Nº da nota ou recibo <input name="documento" value="${esc(vD('documento'))}"></label>
+        <label>${eD && eD.comprovante_path ? 'Trocar a foto da nota (opcional)' : 'Foto da nota ou recibo'} <input name="arquivo" type="file" accept="image/*,application/pdf"></label></div>
+        <p><button class="b">${eD ? 'Salvar alteração' : 'Lançar despesa'}</button> ${eD ? '<button type="button" class="b sec" id="bCancD">Cancelar</button>' : ''} <span class="mut" id="dMsg"></span></p></form>
+        ${fAte ? `<p class="mut" style="margin:0 0 8px">O caixa interno está fechado até <b>${dataBR(fAte)}</b>: despesa paga pelo caixa só pode ter data posterior.</p>` : ''}
         <p class="mut" style="margin:0">Cada gasto tem um lugar só. Os diaristas são lançados no Dia de produção e os salários da equipe fixa ficam no cadastro de equipe. Todo o resto é lançado aqui: contas de energia e água, limpeza, alimentação, manutenção e demais gastos. <b>Mês de referência</b> é o mês do consumo ou do uso (a conta de energia de novembro, paga em dezembro, tem referência em novembro). Compras que duram vários meses, como uniformes, podem ser rateadas em parcelas iguais a partir do mês de referência.</p>`}</div>
     <div class="card"><h2>Despesas de ${MESES[m - 1].toLowerCase()} de ${a}</h2><div class="scroll"><table>
       <tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Fornecedor</th><th class="n">Valor</th><th>Referência</th><th>Pago com</th><th>Forma</th><th>Nota</th><th></th></tr>
       ${desp.map(x => `<tr><td>${dataBR(x.data)}</td><td>${esc(cat(x.categoria_id).nome)}</td><td style="white-space:normal">${esc(x.descricao)}</td><td>${esc(x.fornecedor)}</td><td class="n"><b>${brl(x.valor)}</b></td><td>${refTxt(x)}</td>
         <td><span class="tag ${x.fonte === 'caixa' ? 'az' : ''}">${x.fonte === 'caixa' ? 'Caixa interno' : 'Outra fonte'}</span></td><td>${esc(x.forma_pagamento)}</td><td>${esc(x.documento)}</td>
-        <td>${x.comprovante_path ? `<button class="lnk" data-ver="${x.id}">comprovante</button>` : ''}${fechado ? '' : `<button class="lnk" data-deldesp="${x.id}">excluir</button>`}</td></tr>`).join('') || '<tr><td colspan="10" class="mut">Nenhuma despesa lançada neste mês.</td></tr>'}
+        <td>${x.comprovante_path ? `<button class="lnk" data-ver="${x.id}">comprovante</button>` : ''}${acoesDesp(x)}</td></tr>`).join('') || '<tr><td colspan="10" class="mut">Nenhuma despesa lançada neste mês.</td></tr>'}
       </table></div></div>
     <div class="card"><h2>Resumo por categoria</h2><div class="scroll">${tabCat}</div></div>
     <div class="card"><h2>Caixa interno</h2>
-      <p class="mut">O caixa recebe aportes para as despesas do dia a dia. Toda despesa marcada como paga pelo "Caixa interno" sai deste saldo automaticamente.</p>
+      <p class="mut">O caixa recebe aportes para as despesas do dia a dia. Toda despesa marcada como paga pelo "Caixa interno" sai deste saldo automaticamente. O caixa é fechado dia a dia: o dia fechado não muda mais e o dia seguinte começa com o saldo conferido.</p>
       <div class="kpis" style="margin-bottom:12px"><div class="kpi"><small>Saldo no início do mês</small><b>${brl(saldoIni)}</b></div><div class="kpi"><small>Aportes no mês</small><b>${brl(entradasMes)}</b></div>
         <div class="kpi"><small>Despesas pagas pelo caixa no mês</small><b>${brl(doCaixa)}</b></div><div class="kpi"><small>Devoluções no mês</small><b>${brl(devolMes)}</b></div>
-        <div class="kpi big"><small>Saldo no fim do mês</small><b>${brl(saldoIni + entradasMes - devolMes - doCaixa)}</b></div></div>
-      <form id="fCx" class="row"><label>Data <input name="data" type="date" required value="${hoje()}"></label>
-        <label>Tipo <select name="tipo"><option value="aporte">Aporte (entrada de dinheiro)</option><option value="devolucao">Devolução (saída sem ser despesa)</option></select></label>
-        <label>Valor (R$) <input name="valor" type="number" step="0.01" min="0.01" required></label><label>Observação <input name="descricao" placeholder="quem aportou, motivo"></label>
-        <button class="b sec">Registrar no caixa</button></form>
+        ${ajusteMes ? `<div class="kpi"><small>Ajustes (sobras − faltas) no mês</small><b>${brl(ajusteMes)}</b></div>` : ''}
+        <div class="kpi big"><small>Saldo no fim do mês</small><b>${brl(saldoIni + entradasMes - devolMes - doCaixa + ajusteMes)}</b></div>
+        <div class="kpi"><small>Caixa fechado até</small><b>${fAte ? dataBR(fAte) : 'nunca fechado'}</b></div></div>
+      ${podeCx ? `<div style="border:1px solid var(--line, #ddd);border-radius:10px;padding:12px;margin-bottom:12px"><h2 style="margin-top:0">Fechar o caixa do dia</h2>
+        ${fAte ? '' : '<p class="mut" style="margin-top:0">Este é o <b>primeiro fechamento</b>: ele abre o controle e inclui todo o histórico do caixa até o dia escolhido.</p>'}
+        <form id="fFech" class="row"><label>Dia <input name="data" type="date" required value="${proxCx}" ${fAte ? `min="${somaDias(fAte, 1)}"` : ''} max="${hoje()}"></label>
+          <label>Dinheiro contado no caixa (R$) <input name="contado" type="number" step="0.01" min="0" required></label>
+          <label>Observação <input name="obs" placeholder="opcional"></label>
+          <button class="b">Fechar o caixa do dia</button></form>
+        <div id="fPrev" class="mut" style="margin-top:8px">Calculando o saldo do dia...</div></div>` : `<p class="mut">Fechar o caixa do dia e alterar ou excluir lançamentos do caixa é só para os usuários liberados.</p>`}
+      <h2>${eC ? 'Alterar lançamento do caixa' : 'Lançar no caixa'}</h2>
+      <form id="fCx" class="row"><label>Data <input name="data" type="date" required value="${eC ? eC.data : hoje()}" ${fAte ? `min="${somaDias(fAte, 1)}"` : ''}></label>
+        <label>Tipo <select name="tipo">${Object.entries({ aporte:'Aporte (entrada de dinheiro)', devolucao:'Devolução (saída sem ser despesa)', sobra:'Ajuste: sobra (entrada para corrigir)', falta:'Ajuste: falta (saída para corrigir)' }).map(([k, l]) => `<option value="${k}" ${eC && eC.tipo === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label>Valor (R$) <input name="valor" type="number" step="0.01" min="0.01" required value="${eC ? eC.valor : ''}"></label><label>Observação <input name="descricao" placeholder="quem aportou, motivo" value="${esc(eC ? eC.descricao : '')}"></label>
+        <button class="b sec">${eC ? 'Salvar alteração' : 'Registrar no caixa'}</button>${eC ? ' <button type="button" class="b sec" id="bCancC">Cancelar</button>' : ''}</form>
+      <p class="mut" style="margin:6px 0 0">Erro num dia já fechado não se corrige alterando o dia: lance um <b>ajuste</b> (sobra ou falta) num dia aberto, explicando na observação.</p>
       <div class="scroll" style="margin-top:12px"><table><tr><th>Data</th><th>Tipo</th><th class="n">Valor</th><th>Observação</th><th>Lançado por</th><th></th></tr>
-      ${movMes.map(x => `<tr><td>${dataBR(x.data)}</td><td><span class="tag ${x.tipo === 'aporte' ? 'ok' : ''}">${x.tipo === 'aporte' ? 'Aporte' : 'Devolução'}</span></td><td class="n">${brl(x.valor)}</td><td>${esc(x.descricao)}</td><td>${esc((x.criado_por || '').split('@')[0])}</td>
-        <td><button class="lnk" data-delcx="${x.id}">excluir</button></td></tr>`).join('') || '<tr><td colspan="6" class="mut">Nenhum aporte ou devolução neste mês.</td></tr>'}</table></div></div>
+      ${movMes.map(x => `<tr><td>${dataBR(x.data)}</td><td><span class="tag ${x.tipo === 'aporte' || x.tipo === 'sobra' ? 'ok' : ''}">${TIPO_CX[x.tipo]}</span></td><td class="n">${brl(x.valor)}</td><td>${esc(x.descricao)}</td><td>${esc((x.criado_por || '').split('@')[0])}</td>
+        <td>${cxFechado(x.data) ? '<span class="tag">caixa fechado</span>' : podeCx ? `<button class="lnk" data-editcx="${x.id}">alterar</button> <button class="lnk" data-delcx="${x.id}">excluir</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="mut">Nenhum lançamento do caixa neste mês.</td></tr>'}</table></div>
+      <h2 style="margin-top:16px">Fechamentos do mês</h2>${tabFech}</div>
     <div class="card"><details><summary style="cursor:pointer"><b>Categorias de despesa</b></summary>
       <p class="mut">"Entra no custo" significa que a despesa compõe o rateio por cabeça do mês de referência. Desmarque para o que é só controle e não deve ser cobrado dos cooperados.</p>
       <div class="scroll"><table><tr><th>Categoria</th><th>Entra no custo</th><th>Situação</th><th></th></tr>
@@ -1240,16 +1271,34 @@ async function telaDesp() {
   $('#dMes').onchange = e => { st.despMes = e.target.value; render(); };
   const fD = $('#fDesp');
   if (fD) fD.onsubmit = async e => { e.preventDefault(); const msg = $('#dMsg'); try {
-    const arq = fD.elements.arquivo.files[0]; let caminho = null;
+    const arq = fD.elements.arquivo.files[0]; let caminho = eD ? eD.comprovante_path : null;
     if (arq) { msg.textContent = 'Enviando o comprovante...'; const p = await prepararComprovante(arq);
       caminho = `${fD.elements.data.value.slice(0, 7)}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${p.ext}`;
       const up = await sb.storage.from('comprovantes').upload(caminho, p.blob, { contentType: p.ext === 'jpg' ? 'image/jpeg' : arq.type || 'application/octet-stream' });
       if (up.error) throw new Error('Não foi possível enviar o comprovante: ' + up.error.message); }
-    await q(sb.from('despesas').insert({ data:fD.elements.data.value, categoria_id:Number(fD.elements.categoria_id.value), descricao:fD.elements.descricao.value.trim(), fornecedor:fD.elements.fornecedor.value.trim() || null,
-      valor:Number(fD.elements.valor.value), competencia:fD.elements.competencia.value + '-01', meses_rateio:Number(fD.elements.meses_rateio.value), fonte:fD.elements.fonte.value, forma_pagamento:fD.elements.forma_pagamento.value || null, documento:fD.elements.documento.value.trim() || null, comprovante_path:caminho }));
+    const reg = { data:fD.elements.data.value, categoria_id:Number(fD.elements.categoria_id.value), descricao:fD.elements.descricao.value.trim(), fornecedor:fD.elements.fornecedor.value.trim() || null,
+      valor:Number(fD.elements.valor.value), competencia:fD.elements.competencia.value + '-01', meses_rateio:Number(fD.elements.meses_rateio.value), fonte:fD.elements.fonte.value, forma_pagamento:fD.elements.forma_pagamento.value || null, documento:fD.elements.documento.value.trim() || null, comprovante_path:caminho };
+    if (eD) { await q(sb.from('despesas').update(reg).eq('id', eD.id)); if (arq && eD.comprovante_path) await sb.storage.from('comprovantes').remove([eD.comprovante_path]); st.despEdit = null; }
+    else await q(sb.from('despesas').insert(reg));
     render(); } catch (er) { msg.textContent = ''; falha(er); } };
   $('#fCx').onsubmit = async e => { e.preventDefault(); const f = e.target; try {
-    await q(sb.from('caixa_movimentos').insert({ data:f.elements.data.value, tipo:f.elements.tipo.value, valor:Number(f.elements.valor.value), descricao:f.elements.descricao.value.trim() || null })); render(); } catch (er) { falha(er); } };
+    const reg = { data:f.elements.data.value, tipo:f.elements.tipo.value, valor:Number(f.elements.valor.value), descricao:f.elements.descricao.value.trim() || null };
+    if (eC) { await q(sb.from('caixa_movimentos').update(reg).eq('id', eC.id)); st.cxEdit = null; } else await q(sb.from('caixa_movimentos').insert(reg));
+    render(); } catch (er) { falha(er); } };
+  const bCD = $('#bCancD'); if (bCD) bCD.onclick = () => { st.despEdit = null; render(); };
+  const bCC = $('#bCancC'); if (bCC) bCC.onclick = () => { st.cxEdit = null; render(); };
+  const fF = $('#fFech');
+  if (fF) {
+    const prev = async () => { const d = fF.elements.data.value, el = $('#fPrev'); if (!d) return; try {
+      const r = (await q(sb.rpc('caixa_previa', { p_data:d })))[0];
+      el.innerHTML = `${r.desde ? `Saldo inicial (fechamento anterior) <b>${brl(r.saldo_inicial)}</b>` : 'Abertura do controle'} · (+) aportes ${brl(r.aportes)} · (−) despesas pelo caixa ${brl(r.despesas)} · (−) devoluções ${brl(r.devolucoes)}${Number(r.ajustes) ? ` · (±) ajustes ${brl(r.ajustes)}` : ''} → <b>saldo do sistema ${brl(r.saldo_sistema)}</b>`;
+      fF.dataset.sis = r.saldo_sistema; } catch (er) { el.textContent = er.message; } };
+    fF.elements.data.onchange = prev; prev();
+    fF.onsubmit = async e => { e.preventDefault(); try {
+      const d = fF.elements.data.value, c = Number(fF.elements.contado.value), sis = Number(fF.dataset.sis), dif = Math.round((c - sis) * 100) / 100;
+      if (!confirm(`Fechar o caixa de ${dataBR(d)}?\n\nSaldo do sistema: ${brl(sis)}\nDinheiro contado: ${brl(c)}\n${dif ? `Diferença: ${dif > 0 ? 'sobra' : 'falta'} de ${brl(Math.abs(dif))}, que será lançada como ajuste.` : 'Sem diferença.'}\n\nDepois de fechado, nenhum lançamento do caixa até este dia poderá ser alterado.`)) return;
+      await q(sb.rpc('fechar_caixa', { p_data:d, p_contado:c, p_obs:fF.elements.obs.value.trim() || null })); render(); } catch (er) { falha(er); } };
+  }
   $('#fCat').onsubmit = async e => { e.preventDefault(); try { await q(sb.from('despesa_categorias').insert({ nome:e.target.elements.nome.value.trim() })); render(); } catch (er) { falha(/duplicate|unique/i.test(er.message) ? new Error('Já existe uma categoria com esse nome.') : er); } };
   main.onchange = async e => { const t = e.target; if (!t.dataset.rateia) return; try { await q(sb.from('despesa_categorias').update({ rateia:t.checked }).eq('id', t.dataset.rateia)); render(); } catch (er) { falha(er); } };
   main.onclick = async e => { const t = e.target;
@@ -1257,6 +1306,8 @@ async function telaDesp() {
       if (t.dataset.ver) { const x = desp.find(y => y.id === Number(t.dataset.ver)), r = await sb.storage.from('comprovantes').createSignedUrl(x.comprovante_path, 300); if (r.error) throw new Error(r.error.message); window.open(r.data.signedUrl, '_blank'); }
       if (t.dataset.deldesp) { const x = desp.find(y => y.id === Number(t.dataset.deldesp)); if (!confirm(`Excluir a despesa "${x.descricao}" de ${brl(x.valor)}?`)) return;
         await q(sb.from('despesas').delete().eq('id', x.id)); if (x.comprovante_path) await sb.storage.from('comprovantes').remove([x.comprovante_path]); render(); }
+      if (t.dataset.editdesp) { st.despEdit = Number(t.dataset.editdesp); st.cxEdit = null; await render(); const c = $('#cDesp'); if (c) c.scrollIntoView({ behavior:'smooth' }); }
+      if (t.dataset.editcx) { st.cxEdit = Number(t.dataset.editcx); st.despEdit = null; await render(); const c = $('#fCx'); if (c) c.scrollIntoView({ behavior:'smooth' }); }
       if (t.dataset.delcx) { if (!confirm('Excluir este lançamento do caixa?')) return; await q(sb.from('caixa_movimentos').delete().eq('id', t.dataset.delcx)); render(); }
       if (t.dataset.catativo) { const [id, v] = t.dataset.catativo.split(':'); await q(sb.from('despesa_categorias').update({ ativo: v === 'true' }).eq('id', id)); render(); }
       if (t.id === 'bRelDesp') { $('#rel').innerHTML = `
@@ -1265,7 +1316,8 @@ async function telaDesp() {
           <tr><td>Entram no custo</td><td class="n"><b>${brl(rateavel)}</b></td><td>Pagas por outra fonte</td><td class="n">${brl(total - doCaixa)}</td></tr></table>
         <h2>Despesas por categoria</h2>${tabCat}
         <h2>Caixa interno</h2><table><tr><td>Saldo no início do mês</td><td class="n">${brl(saldoIni)}</td></tr><tr><td>(+) Aportes</td><td class="n">${brl(entradasMes)}</td></tr><tr><td>(−) Despesas pagas pelo caixa</td><td class="n">${brl(doCaixa)}</td></tr>
-          <tr><td>(−) Devoluções</td><td class="n">${brl(devolMes)}</td></tr><tr class="tot"><td>Saldo no fim do mês</td><td class="n">${brl(saldoIni + entradasMes - devolMes - doCaixa)}</td></tr></table>
+          <tr><td>(−) Devoluções</td><td class="n">${brl(devolMes)}</td></tr>${ajusteMes ? `<tr><td>(±) Ajustes (sobras − faltas)</td><td class="n">${brl(ajusteMes)}</td></tr>` : ''}<tr class="tot"><td>Saldo no fim do mês</td><td class="n">${brl(saldoIni + entradasMes - devolMes - doCaixa + ajusteMes)}</td></tr></table>
+        <h2>Fechamentos diários do caixa</h2>${tabFech}
         <h2>Lançamentos</h2><table><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Fornecedor</th><th>Pago com</th><th>Nota</th><th class="n">Valor</th></tr>
           ${[...desp].reverse().map(x => `<tr><td>${dataBR(x.data)}</td><td>${esc(cat(x.categoria_id).nome)}</td><td style="white-space:normal">${esc(x.descricao)}</td><td>${esc(x.fornecedor)}</td><td>${x.fonte === 'caixa' ? 'Caixa' : 'Outra fonte'}${x.forma_pagamento ? ' · ' + esc(x.forma_pagamento) : ''}${x.meses_rateio > 1 || mesRef(x) !== mes.slice(5, 7) + '/' + mes.slice(0, 4) ? '<br>ref. ' + refTxt(x) : ''}</td><td>${esc(x.documento)}</td><td class="n">${brl(x.valor)}</td></tr>`).join('')}
           <tr class="tot"><td colspan="6">Total</td><td class="n">${brl(total)}</td></tr></table>
@@ -1480,9 +1532,10 @@ async function telaUsuarios() {
   const us = await q(sb.from('usuarios').select('*').order('criado_em'));
   const eu = st.perfil.email, selPapel = (v, at = '') => `<select ${at}>${Object.entries(PAPEL).map(([k, l]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
   main.innerHTML = `<div class="card"><h2>Usuários autorizados</h2><div class="scroll"><table>
-    <tr><th>E-mail</th><th>Nome</th><th>Papel</th><th>Situação</th><th></th></tr>
+    <tr><th>E-mail</th><th>Nome</th><th>Papel</th><th>Pode alterar o caixa</th><th>Situação</th><th></th></tr>
     ${us.map(u => `<tr><td>${esc(u.email)}</td><td>${esc(u.nome)}</td>
       <td>${u.email === eu ? PAPEL[u.papel] : selPapel(u.papel, `data-papel="${esc(u.email)}"`)}</td>
+      <td><label style="flex-direction:row;align-items:center;gap:6px;color:var(--ink);font-size:13px"><input type="checkbox" data-cxlib="${esc(u.email)}" ${u.caixa_liberado ? 'checked' : ''}> ${u.caixa_liberado ? 'sim' : 'não'}</label></td>
       <td><span class="tag ${u.ativo ? 'ok' : ''}">${u.ativo ? 'ativo' : 'desativado'}</span></td>
       <td>${u.email === eu ? '<span class="mut">você</span>' : `<button class="lnk" data-ativo="${esc(u.email)}" data-v="${!u.ativo}">${u.ativo ? 'desativar' : 'reativar'}</button>`}</td></tr>`).join('')}
     </table></div>
@@ -1491,15 +1544,17 @@ async function telaUsuarios() {
       <label>E-mail <input name="email" type="email" required></label>
       <label>Nome <input name="nome"></label>
       <label>Papel ${selPapel('operador', 'name="papel"')}</label>
+      <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" name="caixa_liberado"> Pode alterar o caixa</label>
       <button class="b">Autorizar</button></form>
-    <p class="mut">Depois de autorizada, a pessoa abre o sistema, clica em "Primeiro acesso", cria a própria senha e confirma o e-mail. Operador lança e consulta tudo; Administrador também gerencia os usuários.</p></div>`;
+    <p class="mut">Depois de autorizada, a pessoa abre o sistema, clica em "Primeiro acesso", cria a própria senha e confirma o e-mail. Operador lança e consulta tudo; Administrador também gerencia os usuários. <b>Pode alterar o caixa</b>: só quem tem essa marcação fecha o caixa do dia e altera ou exclui lançamentos do caixa interno (aportes, devoluções e despesas pagas pelo caixa) em dia ainda aberto.</p></div>`;
   const f = $('#fUsu');
   f.onsubmit = async e => { e.preventDefault(); try {
-    await q(sb.from('usuarios').insert({ email:f.elements.email.value.trim().toLowerCase(), nome:f.elements.nome.value.trim() || null, papel:f.elements.papel.value })); render(); } catch (er) { falha(er); } };
+    await q(sb.from('usuarios').insert({ email:f.elements.email.value.trim().toLowerCase(), nome:f.elements.nome.value.trim() || null, papel:f.elements.papel.value, caixa_liberado:f.elements.caixa_liberado.checked })); render(); } catch (er) { falha(er); } };
   main.onclick = async e => { const t = e.target; if (!t.dataset.ativo) return;
     try { await q(sb.from('usuarios').update({ ativo:t.dataset.v === 'true' }).eq('email', t.dataset.ativo)); render(); } catch (er) { falha(er); } };
-  main.onchange = async e => { const t = e.target; if (!t.dataset.papel) return;
-    try { await q(sb.from('usuarios').update({ papel:t.value }).eq('email', t.dataset.papel)); render(); } catch (er) { falha(er); } };
+  main.onchange = async e => { const t = e.target;
+    try { if (t.dataset.papel) { await q(sb.from('usuarios').update({ papel:t.value }).eq('email', t.dataset.papel)); render(); }
+      if (t.dataset.cxlib) { await q(sb.from('usuarios').update({ caixa_liberado:t.checked }).eq('email', t.dataset.cxlib)); if (t.dataset.cxlib === eu) st.perfil.caixa_liberado = t.checked; render(); } } catch (er) { falha(er); } };
 }
 
 // ───────── sobre o sistema ─────────
