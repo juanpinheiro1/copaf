@@ -377,10 +377,9 @@ const F_LOTE = [
   { k:'gta', label:'Nº da GTA' }, { k:'propriedade', label:'Propriedade de origem' },
   { k:'municipio_origem', label:'Município de origem' }, { k:'uf_origem', label:'UF' },
   { k:'peso_bruto_kg', label:'Peso bruto (kg)', type:'number' }, { k:'tara_kg', label:'Tara (kg)', type:'number' },
-  { k:'qtd_caixas', label:'Qtd. de caixas', type:'number', step:1 }, { k:'aves_por_caixa', label:'Aves por caixa', type:'number', step:1 },
+  { k:'aves_total', label:'Total de aves recebidas (contadas na chegada)', type:'number', step:1, req:true }, { k:'qtd_caixas', label:'Qtd. de caixas (opcional)', type:'number', step:1 },
   { k:'mortos_chegada', label:'Mortos na chegada', type:'number', step:1, zero:true, def:0 },
   { k:'condenadas', label:'Condenadas (SIE)', type:'number', step:1, zero:true, def:0 },
-  { k:'carcacas_contadas', label:'Carcaças contadas (só lote sem pesagem)', type:'number', step:1 },
   { k:'velocidade_hz', label:'Velocidade (Hz)', type:'number' },
   { k:'hora_inicio', label:'Início', type:'time' }, { k:'hora_termino', label:'Término', type:'time' },
   { k:'minutos_parada', label:'Parada (min)', type:'number', step:1, zero:true, def:0 }, { k:'observacao', label:'Observação' }];
@@ -590,8 +589,6 @@ async function telaDia() {
   $('#bPagto').onclick = () => controlePagamento(d, diaristas);
 
   const fL = $('#fLote'); let editando = null;
-  const travaCarcacas = () => { const el = fL.elements.carcacas_contadas, pesado = fL.elements.peso_bruto_kg.value !== ''; if (pesado) el.value = ''; el.disabled = pesado || fx; };
-  fL.oninput = e => { if (e.target.name === 'peso_bruto_kg') travaCarcacas(); };
   // origem das aves vem do cadastro do cooperado e pode ser ajustada no lote
   const origemDoCooperado = forcar => { const c = st.ref.cooperados.find(x => x.id === Number(fL.elements.cooperado_id.value)); if (!c) return;
     for (const [campo, v] of [['propriedade', c.propriedade], ['municipio_origem', c.municipio], ['uf_origem', c.uf]]) if (forcar || !fL.elements[campo].value) fL.elements[campo].value = v || ''; };
@@ -600,7 +597,8 @@ async function telaDia() {
   fL.elements.veiculo_id.onchange = e => { const v = st.ref.veiculos.find(x => x.id === Number(e.target.value)); if (v && v.tara_kg != null && !fL.elements.tara_kg.value) fL.elements.tara_kg.value = v.tara_kg; };
   fL.onsubmit = async e => { e.preventDefault(); try {
     const o = ler(fL, F_LOTE);
-    if (o.carcacas_contadas == null && (o.qtd_caixas == null || o.aves_por_caixa == null)) return alert('Informe caixas e aves por caixa, ou as carcaças contadas.');
+    if (!(o.aves_total > 0)) return alert('Informe o total de aves recebidas, contadas na chegada.');
+    if (o.mortos_chegada + o.condenadas > o.aves_total) return alert(`Mortos na chegada (${o.mortos_chegada}) + condenadas (${o.condenadas}) passam do total de aves recebidas (${o.aves_total}). Confira os números.`);
     if (o.status === 'finalizado' && !o.hora_termino) return alert('Para finalizar o lote, informe a hora de término.');
     o.finalizado_em = o.status === 'finalizado' ? new Date().toISOString() : null;
     if (editando) await q(sb.from('lotes').update(o).eq('id', editando));
@@ -614,7 +612,7 @@ async function telaDia() {
       if (tab !== 'pesagens_conjuntas' && !confirm('Confirma a exclusão deste lançamento?')) return;
       try { await q(sb.from(tab).delete().eq('id', id)); render(); } catch (er) { falha(er); } }
     if (t.dataset.edit) { const l = lotes.find(x => x.id === Number(t.dataset.edit)); editando = l.id; LOTE_EDIT = l.id;
-      $('#tLote').textContent = 'Editando lote ' + l.codigo; fL.querySelector('.grid').innerHTML = campos(F_LOTE, l); $('#bLimpar').hidden = false; $('#cLote').scrollIntoView({ behavior:'smooth' }); travaCarcacas(); }
+      $('#tLote').textContent = 'Editando lote ' + l.codigo; fL.querySelector('.grid').innerHTML = campos(F_LOTE, l); $('#bLimpar').hidden = false; $('#cLote').scrollIntoView({ behavior:'smooth' }); }
     if (t.id === 'bLimpar') render();
     if (t.dataset.plano) { st.planoLote = Number(t.dataset.plano); await render(); const c = $('#cPlano'); if (c) c.scrollIntoView({ behavior:'smooth' }); }
     if (t.id === 'bFecharPlano') { st.planoLote = null; render(); }
@@ -767,9 +765,9 @@ function relatorio(l, cd, lotes, custoLote, planos, fechado, pesagens, embalagen
     <table><tr><td>Cooperado</td><td><b>${esc(nomeDe('cooperados', l.cooperado_id))}</b></td><td>Data do abate</td><td><b>${dataBR(l.data)}</b></td></tr>
       <tr><td>Tipo de ave</td><td>${esc((st.ref.tipos_ave.find(t => t.codigo === l.tipo_ave) || {}).nome || l.tipo_ave)}</td><td>Veículo / motorista</td><td>${esc(nomeDe('veiculos', l.veiculo_id, 'placa'))} / ${esc(nomeDe('motoristas', l.motorista_id))}</td></tr>
       <tr><td>Peso bruto / tara</td><td>${l.peso_bruto_kg == null ? 'sem pesagem' : `${num(l.peso_bruto_kg)} / ${num(l.tara_kg)} kg`}</td><td>Peso líquido</td><td>${l.peso_liquido_kg == null ? '—' : num(l.peso_liquido_kg) + ' kg'}</td></tr>
-      <tr><td>Aves recebidas</td><td>${num(l.aves_recebidas)}</td><td>Peso médio</td><td>${l.peso_liquido_kg && l.aves_recebidas ? num(l.peso_liquido_kg / l.aves_recebidas, 2) + ' kg' : '—'}</td></tr>
+      <tr><td>Aves recebidas</td><td>${num(l.aves_recebidas)}${l.qtd_caixas ? ` (${num(l.qtd_caixas)} caixas, média de ${num(l.aves_recebidas / l.qtd_caixas, 1)} aves/caixa)` : ''}</td><td>Peso médio</td><td>${l.peso_liquido_kg && l.aves_recebidas ? num(l.peso_liquido_kg / l.aves_recebidas, 2) + ' kg' : '—'}</td></tr>
       <tr><td>Mortos na chegada</td><td>${num(l.mortos_chegada)}</td><td>Condenadas (SIE)</td><td>${num(l.condenadas)}</td></tr>
-      <tr><td>Cabeças pagantes</td><td><b>${num(l.cabecas_pagantes)}</b>${l.carcacas_contadas != null ? ' (contagem de carcaças)' : ''}</td><td>Horário</td><td>${(l.hora_inicio || '').slice(0, 5)} – ${(l.hora_termino || '').slice(0, 5)}</td></tr></table>
+      <tr><td>Cabeças pagantes</td><td><b>${num(l.cabecas_pagantes)}</b></td><td>Horário</td><td>${(l.hora_inicio || '').slice(0, 5)} – ${(l.hora_termino || '').slice(0, 5)}</td></tr></table>
     ${!planos.length ? '' : `<h2>Plano de cortes</h2>
     <table><tr><th class="n">Aves</th><th>Entrega</th><th>Conservação</th></tr>
       ${planos.map(p => `<tr><td class="n">${num(p.aves)}</td><td style="white-space:normal">${esc(descPlano(p, l.tipo_ave))}</td><td>${p.conservacao === 'congelado' ? 'Congelado' : 'Resfriado'}</td></tr>`).join('')}</table>
