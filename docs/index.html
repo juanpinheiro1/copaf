@@ -1181,8 +1181,9 @@ async function telaDesp() {
     q(sb.from('caixa_fechamentos').select('*').order('data', { ascending:false }))]);
   const fAte = fechs.length ? fechs[0].data : null, podeCx = !!(st.perfil && st.perfil.caixa_liberado), cxFechado = d => fAte != null && d <= fAte;
   const fechMes = fechs.filter(x => x.data >= ini && x.data < fim);
-  const proxCx = (() => { const ds = [...cxMov, ...cxDesp].map(x => x.data).filter(d => !cxFechado(d) && d <= hoje()).sort();
-    return ds.length ? ds[0] : fAte ? hoje() : somaDias(hoje(), -1); })();
+  const proxCx = (() => { if (!fAte) return somaDias(hoje(), -1);   // primeiro fechamento: abre o controle até ontem
+    const ds = [...cxMov, ...cxDesp].map(x => x.data).filter(d => !cxFechado(d) && d <= hoje()).sort();
+    return ds.length ? ds[0] : hoje(); })();
   const eD = st.despEdit ? desp.find(x => x.id === st.despEdit) : null, eC = st.cxEdit ? cxMov.find(x => x.id === st.cxEdit) : null;
   if (st.despEdit && !eD) st.despEdit = null; if (st.cxEdit && !eC) st.cxEdit = null;
   const vD = k => eD ? (eD[k] ?? '') : '', selD = (k, v) => eD && String(eD[k]) === String(v) ? 'selected' : '';
